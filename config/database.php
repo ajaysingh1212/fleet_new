@@ -169,6 +169,19 @@ return [
             'database' => env('REDIS_CACHE_DB', '1'),
         ],
 
+        // Hardware socket handling uses bounded Redis I/O timeouts without
+        // changing the existing cache, Horizon or mobile queue connections.
+        'gps' => [
+            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'username' => env('REDIS_USERNAME'),
+            'password' => env('REDIS_PASSWORD'),
+            'port' => env('REDIS_PORT', '6379'),
+            'database' => env('GPS_REDIS_DB', '2'),
+            'timeout' => 0.5,
+            'read_timeout' => 0.5,
+            'read_write_timeout' => 0.5,
+        ],
+
     ],
 
 ];

@@ -1,9 +1,12 @@
 <?php
 
 use App\Models\Conversation;
+use App\Models\GpsDevice;
 use App\Models\User;
 use App\Services\RelationshipAuthorizationService;
 use Illuminate\Support\Facades\Broadcast;
+
+Broadcast::channel('admin.gps.hardware', fn ($user) => $user->can('viewAny', GpsDevice::class));
 
 Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
     if ((int) $user->id === (int) $id) {

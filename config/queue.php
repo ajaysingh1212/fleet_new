@@ -30,6 +30,11 @@ return [
 
     'connections' => [
 
+        'gps-redis' => [
+            'driver' => 'redis', 'connection' => 'gps', 'queue' => 'gps-hardware',
+            'retry_after' => 90, 'block_for' => null, 'after_commit' => false,
+        ],
+
         'sync' => [
             'driver' => 'sync',
         ],

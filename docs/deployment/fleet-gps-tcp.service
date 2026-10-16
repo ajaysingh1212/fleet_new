@@ -1,0 +1,28 @@
+[Unit]
+Description=Fleet hardware GPS TCP gateway on port 9000
+After=network-online.target redis-server.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/fleet
+ExecStart=/usr/bin/php /var/www/fleet/artisan gps:listen --host=0.0.0.0 --port=9000
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+LimitNOFILE=4096
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/fleet/storage /var/www/fleet/bootstrap/cache
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

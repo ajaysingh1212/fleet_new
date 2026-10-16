@@ -1,0 +1,5 @@
+@extends('layouts.app')
+@section('page-title', 'GPS pending devices and diagnostics')
+@section('content')
+<div class="card card-body"><p>Optional metadata only; raw payloads are never retained. Unknown devices are rejected. Registration requires administrator review; it does not automatically activate a device.</p><div class="table-responsive"><table class="table"><thead><tr><th>Received UTC</th><th>Reason</th><th>Protocol</th><th>Identifier</th><th>Remote IP</th><th>Bytes / SHA-256 reference</th><th>Review</th></tr></thead><tbody>@foreach($diagnostics as $row)<tr><td>{{ $row->received_at }}</td><td>{{ $row->reason }}</td><td>{{ $row->protocol ?? 'Unknown' }}</td><td>{{ $row->identifier }}</td><td>{{ $row->remote_ip }}</td><td>{{ $row->byte_count }} / {{ $row->packet_hash }}</td><td>@if($row->identifier)<a href="{{ route('admin.gps-devices.create',['identifier'=>$row->identifier]) }}">Register</a>@endif</td></tr>@endforeach</tbody></table></div>{{ $diagnostics->links() }}</div>
+@endsection

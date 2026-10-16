@@ -14,7 +14,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 
 class ListenMobileGps extends Command
 {
-    protected $signature = 'gps:listen {--host=127.0.0.1} {--port=9000} {--cert=} {--key=} {--once}';
+    protected $signature = 'gps:listen-mobile {--host=127.0.0.1} {--port=9000} {--cert=} {--key=} {--once}';
 
     protected $description = 'Receive authenticated TG1 mobile GPS hex frames over TCP/TLS';
 

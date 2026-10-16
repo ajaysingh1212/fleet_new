@@ -1,0 +1,25 @@
+[Unit]
+Description=Fleet hardware GPS persistence and Reverb broadcast worker
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/fleet
+ExecStart=/usr/bin/php /var/www/fleet/artisan queue:work gps-redis --queue=gps-hardware --sleep=1 --tries=5 --timeout=30 --max-time=3600
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/fleet/storage /var/www/fleet/bootstrap/cache
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

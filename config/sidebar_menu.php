@@ -43,6 +43,8 @@ return [
         'label' => 'Monitoring',
         'icon' => 'fa-solid fa-chart-line',
         'items' => [
+            ['title' => 'GPS Devices', 'icon' => 'fa-solid fa-satellite', 'route' => 'admin.gps-devices.index', 'permission' => 'manage device sessions', 'description' => 'Hardware devices and live vehicle tracking'],
+            ['title' => 'Vehicles', 'icon' => 'fa-solid fa-car', 'route' => 'admin.vehicles.index', 'permission' => 'manage device sessions', 'description' => 'Vehicle registration and installation details'],
             ['title' => 'Geofences', 'icon' => 'fa-solid fa-draw-polygon', 'route' => 'admin.geofences.index', 'permission' => 'use tracking workspace', 'description' => 'Zones and exit alerts for tracked people'],
             ['title' => 'Analytics', 'icon' => 'fa-solid fa-chart-simple', 'route' => 'admin.monitoring.dashboard', 'permission' => 'manage geofences', 'description' => 'KPIs, trends, leaderboards'],
             ['title' => 'GPS History', 'icon' => 'fa-solid fa-route', 'route' => 'admin.monitoring.history', 'permission' => 'manage geofences', 'description' => 'History filters and timeline'],

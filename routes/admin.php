@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\DeviceSessionController;
 use App\Http\Controllers\Admin\GeofenceController;
 use App\Http\Controllers\Admin\GeoLookupController;
 use App\Http\Controllers\Admin\GlobalSearchController;
+use App\Http\Controllers\Admin\GpsDeviceController;
 use App\Http\Controllers\Admin\LanguageController;
 use App\Http\Controllers\Admin\LicensePlanController;
 use App\Http\Controllers\Admin\LicenseRenewalController;
@@ -22,9 +23,17 @@ use App\Http\Controllers\Admin\SupportTicketController;
 use App\Http\Controllers\Admin\TrackingRelationController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Admin\UserLicenseController;
+use App\Http\Controllers\Admin\VehicleController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(function () {
+    Route::middleware(['can:viewAny,App\Models\GpsDevice', 'throttle:60,1'])->group(function () {
+        Route::get('gps-devices/diagnostics', [GpsDeviceController::class, 'diagnostics'])->name('gps-devices.diagnostics');
+        Route::get('gps-devices/{gpsDevice}/documents/{index}', [GpsDeviceController::class, 'document'])->whereNumber('index')->name('gps-devices.document');
+        Route::resource('gps-devices', GpsDeviceController::class)->except('destroy')->parameters(['gps-devices' => 'gpsDevice']);
+        Route::get('vehicles/{vehicle}/documents/{index}', [VehicleController::class, 'document'])->whereNumber('index')->name('vehicles.document');
+        Route::resource('vehicles', VehicleController::class)->except(['show', 'destroy']);
+    });
     Route::middleware('permission:manage users')->group(function () {
         Route::get('users/{id}/restore', [UserController::class, 'restore'])->name('users.restore')->where('id', '[0-9]+');
         Route::resource('users', UserController::class);

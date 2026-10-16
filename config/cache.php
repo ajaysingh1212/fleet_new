@@ -33,6 +33,10 @@ return [
 
     'stores' => [
 
+        'gps-redis' => [
+            'driver' => 'redis', 'connection' => 'gps', 'lock_connection' => 'gps',
+        ],
+
         'array' => [
             'driver' => 'array',
             'serialize' => false,

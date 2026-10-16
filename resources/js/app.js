@@ -9,6 +9,7 @@ import Chart from 'chart.js/auto';
 import { initThemeCustomizer } from './theme-customizer';
 import { initNotificationCenter } from './notifications';
 import { initIncomingCallRinger } from './calls';
+import { initHardwareGps } from './hardware-gps';
 
 window.$ = window.jQuery = $;
 window.Swal = Swal;
@@ -23,6 +24,7 @@ try {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    initHardwareGps();
     initThemeCustomizer();
     initNotificationCenter();
     initIncomingCallRinger();

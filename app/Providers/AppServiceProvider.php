@@ -12,6 +12,7 @@ use App\Models\City;
 use App\Models\Conversation;
 use App\Models\Country;
 use App\Models\DeviceSession;
+use App\Models\GpsDevice;
 use App\Models\Language;
 use App\Models\LicensePlan;
 use App\Models\Message;
@@ -22,6 +23,7 @@ use App\Models\SupportTicket;
 use App\Models\TrackingRelation;
 use App\Models\User;
 use App\Models\UserLicense;
+use App\Models\Vehicle;
 use App\Observers\AuditableObserver;
 use App\Observers\UserObserver;
 use App\Policies\CallSessionPolicy;
@@ -29,6 +31,7 @@ use App\Policies\CityPolicy;
 use App\Policies\ConversationPolicy;
 use App\Policies\CountryPolicy;
 use App\Policies\DeviceSessionPolicy;
+use App\Policies\GpsDevicePolicy;
 use App\Policies\LanguagePolicy;
 use App\Policies\LicensePlanPolicy;
 use App\Policies\MessagePolicy;
@@ -74,6 +77,9 @@ class AppServiceProvider extends ServiceProvider
     {
         Model::shouldBeStrict(! app()->isProduction());
         Paginator::useBootstrapFive();
+        Gate::policy(GpsDevice::class, GpsDevicePolicy::class);
+        GpsDevice::observe(AuditableObserver::class);
+        Vehicle::observe(AuditableObserver::class);
 
         RateLimiter::for('api', function (Request $request) {
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
