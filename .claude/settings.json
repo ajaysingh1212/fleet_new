@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -b /tmp/cookies.txt \"http://127.0.0.1:8123/dashboard\")",
+      "Bash(curl -s -b /tmp/cookies_user.txt -o /dev/null -w \"%{http_code}\\\\n\" \"http://127.0.0.1:8123/admin/support-tickets\")",
+      "Bash(curl -s -b /tmp/cookies_user.txt -o /dev/null -w \"user access to admin/support-tickets: %{http_code}\\\\n\" \"http://127.0.0.1:8123/admin/support-tickets\")",
+      "Bash(curl -s -b /tmp/cookies_user.txt \"http://127.0.0.1:8123/dashboard\")",
+      "Bash(curl -s -b /tmp/cookies_user.txt -o /dev/null -w \"notification-templates: %{http_code}\\\\n\" \"http://127.0.0.1:8123/admin/notification-templates\")",
+      "Bash(curl -s -b /tmp/cookies_user.txt -o /dev/null -w \"notification-logs: %{http_code}\\\\n\" \"http://127.0.0.1:8123/admin/notification-logs\")",
+      "Bash(curl -s -b /tmp/cookies.txt -o /dev/null -w \"admin notification-templates: %{http_code}\\\\n\" \"http://127.0.0.1:8123/admin/notification-templates\")",
+      "Bash(rm -f \"c:\\\\track2026\\\\track2026\\\\tests\\\\Feature\\\\Auth\\\\DebugPresenceTest.php\" *)",
+      "PowerShell(Stop-Process -Id 7760,19452,12456,11268,17764 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name = 'php.exe'\")",
+      "Bash(curl -s -o /dev/null -w \"serve:%{http_code}\\\\n\" http://127.0.0.1:8000/login)",
+      "Bash(curl -s -o /dev/null -w \"reverb:%{http_code}\\\\n\" http://127.0.0.1:8080/app/c6cc054513026a895e2a?protocol=7)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

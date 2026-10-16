@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <!--
+            "log" instead of "reverb": broadcast() becomes a local, no-op
+            log write instead of a real network push. Without this, every
+            test that creates users/groups/calls/notifications (Faker names,
+            "Team"/"Field Team" fixtures, etc.) broadcasts for real to
+            whatever Reverb server this app's .env points at — including a
+            developer's own live browser session sitting on /chats, which is
+            exactly how random fake "X added you to Team" notifications and
+            phantom incoming calls show up while someone is just using the
+            app normally. BroadcastingChannelTest opts back into the real
+            "reverb" driver for its own tests, since it specifically needs
+            to exercise real channel-authorization logic (which itself never
+            touches the network — only the outbound broadcast() push does).
+        -->
+        <env name="BROADCAST_CONNECTION" value="log"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+    </php>
+</phpunit>
