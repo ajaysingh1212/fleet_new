@@ -17,6 +17,8 @@ class ProcessHardwarePacket implements ShouldQueue
 
     public int $timeout = 30;
 
+    public bool $broadcast = true;
+
     public function backoff(): array
     {
         return [1, 5, 15, 30];
@@ -27,7 +29,10 @@ class ProcessHardwarePacket implements ShouldQueue
         public string $peer, public string $protocol, public string $version, public string $type,
         public string $hash, public array $locations, public array $events, public string $receivedAt,
         public ?int $vehicleId,
-    ) {}
+        bool $broadcast = true,
+    ) {
+        $this->broadcast = $broadcast;
+    }
 
     public function handle(): void
     {
@@ -75,7 +80,7 @@ class ProcessHardwarePacket implements ShouldQueue
             }
             // Communication telemetry should not pollute the administrative audit log.
             $device->forceFill($changes)->saveQuietly();
-            if ($latest && $latest->packet_hash === $this->hash && $this->locations) {
+            if ($this->broadcast && $latest && $latest->packet_hash === $this->hash && $this->locations) {
                 $payload = HardwareLocationUpdated::payload($device, $latest);
                 DB::afterCommit(fn () => HardwareLocationUpdated::dispatch($payload));
             }

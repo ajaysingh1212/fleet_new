@@ -1,9 +1,9 @@
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath 'D:\fleet_new'
-$Host.UI.RawUI.WindowTitle = 'GPS LIVE - Port 9000 - IMEI 864540081540460'
+$Host.UI.RawUI.WindowTitle = 'GPS LIVE - Port 9000 - Two Devices'
 $gpsLogPath = 'D:\fleet_new\storage\logs\gps-live-diagnostic.log'
-Write-Host 'GPS LIVE DIAGNOSTIC - IMEI 864540081540460' -ForegroundColor Cyan
-Write-Host 'PT06 V02: live GPS, alarms, heartbeat, SIM and LBS. No database persistence.' -ForegroundColor Yellow
+Write-Host 'GPS LIVE DIAGNOSTIC - IMEIs 864540081540460, 861128068689493' -ForegroundColor Cyan
+Write-Host 'PT06 V02: live GPS, alarms, heartbeat, SIM and LBS. Local database storage enabled for registered devices.' -ForegroundColor Yellow
 Write-Host 'If the Python test listener is running, press Ctrl+C in its terminal.' -ForegroundColor Yellow
 $gpsWaitLogged = $false
 while (@(netstat -ano -p tcp | Select-String '^\s*TCP\s+\S+:9000\s+\S+\s+LISTENING\s+\d+\s*$').Count -gt 0) {
@@ -16,6 +16,6 @@ while (@(netstat -ano -p tcp | Select-String '^\s*TCP\s+\S+:9000\s+\S+\s+LISTENI
     Start-Sleep -Seconds 2
 }
 Write-Host 'Port 9000 is free. Starting Laravel diagnostic listener...' -ForegroundColor Green
-& 'C:\xampp\php\php.exe' artisan gps:listen --host=0.0.0.0 --port=9000 --diagnostic --diagnostic-protocol=pt06 --diagnostic-imei=864540081540460 2>&1 |
+& 'C:\xampp\php\php.exe' artisan gps:listen --host=0.0.0.0 --port=9000 --diagnostic --persist --registered --diagnostic-protocol=pt06 2>&1 |
     ForEach-Object { Write-Output $_; Add-Content -LiteralPath $gpsLogPath -Value $_ -Encoding UTF8 }
 Write-Host "Listener exited with code $LASTEXITCODE. Log: $gpsLogPath" -ForegroundColor Yellow

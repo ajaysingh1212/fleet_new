@@ -2,7 +2,7 @@
 
 namespace App\Services\Gps\Gateway;
 
-/** Last reported observations for the single explicitly allowlisted device. */
+/** Last reported observations for one explicitly allowlisted device. */
 final class GpsDiagnosticState
 {
     private ?string $imei = null;

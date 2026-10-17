@@ -41,7 +41,13 @@ class HardwareLocationUpdated implements ShouldBroadcast
 
     public static function payload(GpsDevice $device, GpsDeviceLocation $location): array
     {
-        return ['device_id' => $device->id, 'vehicle_id' => $location->vehicle_id, 'latitude' => $location->latitude,
+        return ['device_id' => $device->id, 'vehicle_id' => $location->vehicle_id,
+            'registration' => $device->vehicle?->registration_number,
+            'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle'),
+            'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
+            'acc' => $location->telemetry['acc'] ?? null, 'authorization' => $device->status,
+            'last_packet_at' => $device->last_packet_at?->toIso8601String(), 'idle_seconds' => config('gps.idle_seconds'),
+            'latitude' => $location->latitude,
             'longitude' => $location->longitude, 'speed' => $location->speed, 'heading' => $location->heading,
             'recorded_at' => $location->recorded_at->toIso8601String(), 'received_at' => $location->received_at->toIso8601String(),
             'protocol' => $location->protocol, 'model' => $device->model];

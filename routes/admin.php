@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Route;
 Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(function () {
     Route::middleware(['can:viewAny,App\Models\GpsDevice', 'throttle:60,1'])->group(function () {
         Route::get('gps-devices/diagnostics', [GpsDeviceController::class, 'diagnostics'])->name('gps-devices.diagnostics');
+        Route::get('gps-devices/fleet', [GpsDeviceController::class, 'fleet'])->name('gps-devices.fleet');
         Route::get('gps-devices/{gpsDevice}/documents/{index}', [GpsDeviceController::class, 'document'])->whereNumber('index')->name('gps-devices.document');
         Route::resource('gps-devices', GpsDeviceController::class)->except('destroy')->parameters(['gps-devices' => 'gpsDevice']);
         Route::get('vehicles/{vehicle}/documents/{index}', [VehicleController::class, 'document'])->whereNumber('index')->name('vehicles.document');

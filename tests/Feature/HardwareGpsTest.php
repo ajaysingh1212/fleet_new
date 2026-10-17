@@ -10,12 +10,16 @@ use App\Services\Gps\Gateway\Connection;
 use App\Services\Gps\Gateway\DeviceAllowlist;
 use App\Services\Gps\Gateway\Gateway;
 use App\Services\Gps\Gateway\Location;
+use App\Services\Gps\Gateway\Packet;
 use App\Services\Gps\Gateway\ProtocolRegistry;
 use App\Services\Gps\Gateway\Protocols\ConcoxX1;
 use App\Services\Gps\Gateway\Protocols\Pt06;
 use App\Services\Gps\Gateway\Protocols\Teltonika;
+use App\Services\Gps\HardwareFleet;
 use App\Services\Gps\HardwareRegistrationService;
+use App\Services\Gps\LocalHardwareRecorder;
 use Carbon\CarbonImmutable;
+use Database\Seeders\HardwareFleetSeeder;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -71,6 +75,67 @@ class HardwareGpsTest extends TestCase
     private function device(): GpsDevice
     {
         return app(HardwareRegistrationService::class)->save($this->registration());
+    }
+
+    public function test_real_fleet_seeder_is_repeatable_and_map_includes_devices_beyond_table_pagination(): void
+    {
+        $this->actingAsSuperAdmin();
+        $this->seed(HardwareFleetSeeder::class);
+        $this->seed(HardwareFleetSeeder::class);
+        $this->assertDatabaseCount('vehicles', 2);
+        $this->assertDatabaseCount('gps_devices', 2);
+        $this->assertDatabaseCount('gps_device_assignments', 2);
+        $this->assertDatabaseCount('gps_device_locations', 1);
+        $bike = GpsDevice::with('vehicle')->where('identifier', '864540081540460')->firstOrFail();
+        $car = GpsDevice::with(['vehicle', 'latestLocation'])->where('identifier', '861128068689493')->firstOrFail();
+        $this->assertSame('BR52C6695', $bike->vehicle->registration_number);
+        $this->assertSame('bike', $bike->vehicle->details['type']);
+        $this->assertSame('Ajay Kumar', $car->vehicle->details['driver_name']);
+        $this->assertSame('Airtel', $car->details['network_provider']);
+        $this->assertNull($bike->latest_location_id);
+        $this->assertEqualsWithDelta(25.60965, $car->latestLocation->latitude, 0.0000001);
+        for ($n = 0; $n < 26; $n++) {
+            $vehicle = Vehicle::create(['registration_number' => 'EXTRA'.$n, 'name' => 'Untracked vehicle', 'status' => 'active']);
+            GpsDevice::create(['name' => 'Extra tracker', 'identifier' => '100000000000'.str_pad((string) $n, 3, '0', STR_PAD_LEFT),
+                'protocol' => 'pt06', 'status' => 'inactive', 'vehicle_id' => $vehicle->id]);
+        }
+        Vehicle::create(['registration_number' => 'UNASSIGNED', 'name' => 'No tracker', 'status' => 'active']);
+        $response = $this->getJson(route('admin.gps-devices.fleet'))->assertOk()->assertJsonCount(29, 'devices');
+        $this->assertStringNotContainsString('sim_iccid', $response->getContent());
+        $this->assertStringNotContainsString('configuration', $response->getContent());
+        $this->get(route('admin.gps-devices.index'))->assertOk()->assertSee('BR28Z4291');
+        $this->actingAsPlainUser();
+        $this->getJson(route('admin.gps-devices.fleet'))->assertForbidden();
+    }
+
+    public function test_local_recording_requires_active_registration_and_map_distinguishes_idle_parked_and_stale(): void
+    {
+        $this->seed(HardwareFleetSeeder::class);
+        $device = GpsDevice::where('identifier', '864540081540460')->firstOrFail();
+        $recorder = app(LocalHardwareRecorder::class);
+        $this->assertTrue($recorder->allows($device->identifier, 'pt06', Pt06::VERSION));
+        $this->assertFalse($recorder->allows('123456789012345', 'pt06', Pt06::VERSION));
+        $this->assertFalse($recorder->allows($device->identifier, 'gt06', '1.8.1'));
+        $c = new Connection('127.0.0.1');
+        $location = new Location(25.6, 85.1, CarbonImmutable::now('UTC'), 0, 0, gpsFix: true, telemetry: ['acc' => true]);
+        $packet = new Packet('location', null, Pt06::VERSION, locations: [$location]);
+        $recorder->record($packet, 'simulated-live-position', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $recorder->record($packet, 'simulated-live-position', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $this->assertDatabaseCount('gps_device_locations', 2);
+        $fleet = app(HardwareFleet::class);
+        $this->assertSame('idle', $fleet->device($device->fresh())['state']);
+        $heartbeat = new Packet('heartbeat', null, Pt06::VERSION, events: ['acc' => false]);
+        $this->travel(2)->seconds();
+        $recorder->record($heartbeat, 'heartbeat-off', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $this->assertSame('parked', $fleet->device($device->fresh())['state']);
+        $this->travel(190)->seconds();
+        $recorder->record($heartbeat, 'heartbeat-stale-fix', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $this->assertSame('stale_gps', $fleet->device($device->fresh())['state']);
+        Event::assertNotDispatched(HardwareLocationUpdated::class);
+        $device->update(['status' => 'blocked']);
+        $this->assertFalse($recorder->allows($device->identifier, 'pt06', Pt06::VERSION));
+        $this->expectExceptionMessage('persistence_requires_active_registered_device_and_matching_protocol');
+        $recorder->record($packet, 'blocked-position', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
     }
 
     public function test_pt06_registered_profile_resolves_legacy_login_and_persists_pdf_packets(): void

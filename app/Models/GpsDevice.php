@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class GpsDevice extends Model
 {
@@ -26,6 +27,11 @@ class GpsDevice extends Model
     public function latestLocation(): BelongsTo
     {
         return $this->belongsTo(GpsDeviceLocation::class, 'latest_location_id');
+    }
+
+    public function latestHeartbeat(): HasOne
+    {
+        return $this->hasOne(GpsDeviceEvent::class)->ofMany(['id' => 'max'], fn ($query) => $query->where('type', 'heartbeat'));
     }
 
     public function getIsOnlineAttribute(): bool

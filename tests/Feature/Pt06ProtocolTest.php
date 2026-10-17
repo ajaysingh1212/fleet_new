@@ -18,6 +18,66 @@ class Pt06ProtocolTest extends TestCase
         return hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/pt06/device-'.$type.'-20261017.hex'))));
     }
 
+    public function test_two_allowlisted_devices_have_separate_tcp_output_and_unknown_device_is_rejected(): void
+    {
+        $reservation = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
+        $port = (int) substr(strrchr(stream_socket_get_name($reservation, false), ':'), 1);
+        fclose($reservation);
+        $process = new Process([PHP_BINARY, 'artisan', 'gps:diagnose', '--host=127.0.0.1', '--port='.$port,
+            '--imei=864540081540460,861128068689493', '--seconds=4', '--format=json'], base_path());
+        $sockets = [];
+        try {
+            $process->start();
+            $deadline = microtime(true) + 5;
+            while (! str_contains($process->getOutput(), 'GPS TCP DIAGNOSTIC LISTENER')) {
+                if (! $process->isRunning() || microtime(true) > $deadline) {
+                    $this->fail($process->getOutput());
+                }
+                usleep(20000);
+            }
+            foreach (['864540081540460', '861128068689493', '123456789012345'] as $index => $imei) {
+                $socket = stream_socket_client('tcp://127.0.0.1:'.$port, $errno, $error, 3);
+                $sockets[] = $socket;
+                stream_set_timeout($socket, 3);
+                // Simulated IMEI-only logins. Only the first device has a GPS packet.
+                fwrite($socket, $this->frame(1, hex2bin('0'.$imei))
+                    .($index === 0 ? $this->fixture('location') : '')
+                    .$this->deviceFixture('heartbeat'));
+                $reply = '';
+                while (strlen($reply) < 20 && ($chunk = fread($socket, 20 - strlen($reply))) !== '' && $chunk !== false) {
+                    $reply .= $chunk;
+                }
+                $this->assertSame($index < 2 ? 20 : 0, strlen($reply));
+            }
+            $this->assertSame(0, $process->wait());
+            $records = [];
+            foreach (explode("\n", $process->getOutput()) as $line) {
+                $record = json_decode(trim($line), true);
+                if (is_array($record)) {
+                    $records[] = $record;
+                }
+            }
+            $summaries = array_values(array_filter($records, fn ($record) => $record['event'] === 'DEVICE_STATUS'));
+            $this->assertCount(2, $summaries);
+            $this->assertSame('864540081540460', $summaries[0]['imei']);
+            $this->assertNotNull($summaries[0]['last_reported_position']);
+            $this->assertSame('861128068689493', $summaries[1]['imei']);
+            $this->assertNull($summaries[1]['last_reported_position']);
+            $this->assertSame(['login' => 1, 'heartbeat' => 1], $summaries[1]['packet_counts']);
+            $rejected = array_values(array_filter($records, fn ($record) => $record['event'] === 'DISCONNECTED' && $record['reason'] === 'not_diagnostic_allowlisted'));
+            $this->assertCount(1, $rejected);
+        } finally {
+            foreach ($sockets as $socket) {
+                if (is_resource($socket)) {
+                    fclose($socket);
+                }
+            }
+            if ($process->isRunning()) {
+                $process->stop();
+            }
+        }
+    }
+
     public function test_actual_device_capture_explains_no_fix_low_power_and_decodes_all_available_fields(): void
     {
         $state = new GpsDiagnosticState;

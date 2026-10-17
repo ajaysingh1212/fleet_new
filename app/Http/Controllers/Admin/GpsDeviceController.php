@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Events\HardwareLocationUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\GpsDeviceRequest;
 use App\Models\GpsDevice;
 use App\Models\GpsDeviceLocation;
 use App\Models\Vehicle;
+use App\Services\Gps\HardwareFleet;
 use App\Services\Gps\HardwareRegistrationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -49,10 +49,17 @@ class GpsDeviceController extends Controller
             'pending identifiers' => DB::table('gps_packet_diagnostics')->where('reason', 'unauthorized_device')->whereNotNull('identifier')
                 ->whereNotIn('identifier', GpsDevice::select('identifier'))->distinct()->count('identifier'),
             'moving' => $moving, 'stopped' => $stopped];
-        $positions = $devices->getCollection()->filter(fn ($d) => $d->latestLocation)
-            ->map(fn ($d) => HardwareLocationUpdated::payload($d, $d->latestLocation))->values();
+        $positions = app(HardwareFleet::class)->snapshot();
 
         return view('admin.gps-devices.index', compact('devices', 'stats', 'positions'));
+    }
+
+    public function fleet()
+    {
+        $this->authorize('viewAny', GpsDevice::class);
+
+        return response()->json(['devices' => app(HardwareFleet::class)->snapshot()])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function create(Request $request)

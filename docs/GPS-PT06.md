@@ -49,10 +49,14 @@ Only FX heartbeat encoding reports measured external supply voltage.
 
 ```powershell
 cd D:\fleet_new
-php artisan gps:listen --host=0.0.0.0 --port=9000 --diagnostic --diagnostic-protocol=pt06 --diagnostic-imei=864540081540460 --format=pretty
+php artisan gps:listen --host=0.0.0.0 --port=9000 --diagnostic --diagnostic-protocol=pt06 "--diagnostic-imei=864540081540460,861128068689493" --format=pretty
 ```
 
 Stop the previous port-9000 listener with Ctrl+C before starting this command.
+Comma-separated IMEIs allow up to 32 explicit devices. Each has its own heartbeat,
+SIM, position and packet counters; summaries never borrow another device's fix.
+Other identifiers are rejected without ACK. This flag is diagnostic-only and does
+not create or activate production database registrations.
 The current build prints `decoded-device-summary-v2` at startup. A terminal
 still showing `GPS tracking enabled` with no PT06 profile/summary banner is
 running older code and must be restarted. PHP socket processes retain their
@@ -67,9 +71,11 @@ not positioned, ACC and charging are off. This does not establish why the
 device has no fix or why it closes the TCP connection. It supplies no latitude,
 longitude, satellite count, speed or cell-tower measurements.
 
-`tools/start-gps-live.ps1` also uses PT06 and mirrors terminal output to
-`storage/logs/gps-live-diagnostic.log`. Diagnostic mode uses no Redis or database
-and does not store/broadcast positions. Production mode still requires Redis and
+`tools/start-gps-live.ps1` now enables explicit local fleet storage and mirrors
+terminal output to `storage/logs/gps-live-diagnostic.log`; see GPS-FLEET.md.
+Default diagnostic mode uses no Redis or database and does not store/broadcast
+positions. `--persist --registered` enables SQL storage for active registrations
+and admin-map polling without Redis. Production mode still requires Redis and
 the hardware queue worker described in GPS-IMPLEMENTATION.md.
 
 ## Validation and generated files

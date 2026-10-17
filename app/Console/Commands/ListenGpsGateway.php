@@ -13,7 +13,7 @@ use Throwable;
 
 class ListenGpsGateway extends Command
 {
-    protected $signature = 'gps:listen {--host=} {--port=9000} {--cert=} {--key=} {--once} {--mobile} {--diagnostic} {--diagnostic-imei=} {--format=pretty} {--diagnostic-protocol=pt06}';
+    protected $signature = 'gps:listen {--host=} {--port=9000} {--cert=} {--key=} {--once} {--mobile} {--diagnostic} {--diagnostic-imei= : Comma-separated diagnostic IMEIs} {--format=pretty} {--diagnostic-protocol=pt06} {--persist : Store diagnostic packets locally for registered devices} {--registered : Accept all active SQL registrations with --persist}';
 
     protected $description = 'Run the bounded hardware TCP gateway (or legacy TG1 with --mobile / --cert)';
 
@@ -24,7 +24,7 @@ class ListenGpsGateway extends Command
         if ($this->option('diagnostic')) {
             return $this->call('gps:diagnose', ['--host' => $this->option('host') ?: '0.0.0.0',
                 '--port' => $this->option('port'), '--imei' => $this->option('diagnostic-imei') ?: '', '--format' => $this->option('format'),
-                '--protocol' => $this->option('diagnostic-protocol')]);
+                '--protocol' => $this->option('diagnostic-protocol'), '--persist' => (bool) $this->option('persist'), '--registered' => (bool) $this->option('registered')]);
         }
         // Preserve the existing TLS invocation and all TG1 authentication semantics.
         if ($this->option('mobile') || $this->option('cert')) {
