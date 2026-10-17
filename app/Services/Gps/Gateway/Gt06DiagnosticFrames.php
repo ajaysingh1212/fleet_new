@@ -5,7 +5,7 @@ namespace App\Services\Gps\Gateway;
 use App\Services\Gps\Gateway\Protocols\ConcoxX1;
 use InvalidArgumentException;
 
-/** Diagnostic framing only: extended messages are captured, never guessed. */
+/** Shared CRC-checked short/extended framing; adapters decide payload semantics. */
 final class Gt06DiagnosticFrames
 {
     public function extract(string &$buffer): ?string

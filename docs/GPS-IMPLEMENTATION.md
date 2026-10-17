@@ -342,6 +342,32 @@ shows CONNECTED, DATA_RECEIVED, LOGIN, ACK_SENT, HEARTBEAT, GPS_LOCATION,
 GPS_NO_FIX, PACKET_NOT_DECODED, DISCONNECTED and a status summary every 15s.
 Times use IST. A TCP connection or login alone is not proof of GPS fixes.
 
+Readable terminal output is the default (`--format=pretty`). It displays packet
+framing, declared/received lengths, protocol type, serial number, CRC, bounded
+raw HEX and payload HEX for the explicitly allowed device. GPS records include
+latitude/longitude, speed in km/h, satellites, heading, GPS UTC time, available
+cell-tower fields, fix validity and a map link for valid fixes. The summary
+separately retains the last valid fix. Missing fields display "Not provided";
+no-fix records are not presented as confirmed positions. Heartbeats show ACC,
+charging, GPS tracking enabled, power/GSM levels, status bits and language code.
+Levels are not converted to invented voltages or battery percentages.
+
+Extended 94/0A packets with the exact identifier layout show IMEI, encoded IMSI
+and encoded ICCID, with optional documented door/air-con bits. These fields
+contain no coordinates; encoding/padding is preserved rather than guessed.
+This diagnostic interpretation follows section 5.6 of the
+[manufacturer S20 V2.1 protocol](https://www.traccar.org/protocol/5023-gt06/S20WanWayProtocol2021.03.22V21.pdf),
+whose layout matches the observed packet. It does not certify all BT50 firmware
+or enable extra production adapters/ACKs. Unsupported types remain raw/unknown.
+SIM identifiers appear only in the requested local diagnostics, not production
+broadcasts. Treat the terminal/log as private diagnostics.
+
+Append `--format=json` for scripts that need the earlier structured stream.
+Both formats have real loopback TCP process tests. Laravel listener commands
+also acquire a local OS file lock for the selected port to prevent duplicate
+PHP listeners sharing TCP/9000 on Windows. Stop the current listener with Ctrl+C
+before starting another.
+
 `tools/start-gps-live.ps1` opens the same diagnostic mode for this workspace,
 waits until port 9000 is free, and mirrors terminal output into
 `storage/logs/gps-live-diagnostic.log`. Stop the Python test listener using

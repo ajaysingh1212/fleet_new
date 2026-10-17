@@ -68,6 +68,10 @@ final class Gt06 implements Protocol
 
             return new Packet('heartbeat', null, '1.8.1', $this->ack($type, $serial), events: [
                 'acc' => (bool) (ord($payload[0]) & 2), 'power_level' => ord($payload[1]), 'gsm_level' => ord($payload[2]),
+                'gps_tracking_enabled' => (bool) (ord($payload[0]) & 0x40), 'charging' => (bool) (ord($payload[0]) & 4),
+                'relay_disconnected' => (bool) (ord($payload[0]) & 0x80), 'defense_active' => (bool) (ord($payload[0]) & 1),
+                'alarm_status_bits' => (ord($payload[0]) >> 3) & 7,
+                'terminal_status_hex' => sprintf('%02X', ord($payload[0])), 'language_code_hex' => strtoupper(bin2hex(substr($payload, 3, 2))),
             ]);
         }
         if ($type !== 0x12 || strlen($payload) !== 26) {

@@ -33,6 +33,20 @@ final class Gateway
                 $connection->identifier = $packet->identifier;
             }
             $device = $connection->identifier ? $this->allowlist->find($connection->identifier) : null;
+            // IMEI-only GT06/PT06 login is identical. Only an allowlisted
+            // registration may select a different compatible adapter profile.
+            if ($device && $device['active'] && $packet->type === 'login' && $connection->device === null
+                && $device['protocol'] !== $connection->protocol->name()) {
+                $registered = $this->registry->named($device['protocol']);
+                if ($registered) {
+                    $verified = $registered->decode($frame, false);
+                    if ($verified->type !== 'login' || $verified->identifier !== $connection->identifier) {
+                        throw new InvalidArgumentException('unauthorized_device');
+                    }
+                    $connection->protocol = $registered;
+                    $packet = $verified;
+                }
+            }
             if (! $device || ! $device['active'] || $device['protocol'] !== $connection->protocol->name()
                 || ($packet->version !== 'login' && $packet->version !== $device['version'])) {
                 throw new InvalidArgumentException('unauthorized_device');

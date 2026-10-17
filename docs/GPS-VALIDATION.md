@@ -1,5 +1,13 @@
 # Validation — 2026-10-16
 
+Readable-output follow-up: **64 targeted GPS tests passed, one Redis test
+skipped, 309 assertions** before the final duplicate-listener guard. New checks
+cover pretty and JSON real TCP streams, GPS units/map/fix validity, 94/0A
+identifier decoding without guessed padding/coordinates, and missing-fix
+display. DB-backed tests use guarded in-memory SQLite, not the application
+database. The final guard additionally tests rejection of a second Laravel
+listener on the same port.
+
 Live-listener follow-up: **61 passed, 1 opt-in Redis network test skipped,
 279 assertions**. A real TCP subprocess diagnostic test verifies fragmented
 login, documented ACK and simulated location handling without Redis/SQL.

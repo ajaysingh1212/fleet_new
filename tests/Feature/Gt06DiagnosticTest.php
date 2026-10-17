@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Services\Gps\Gateway\GpsDiagnosticFormatter;
+use App\Services\Gps\Gateway\Gt06DiagnosticDetails;
 use App\Services\Gps\Gateway\Gt06DiagnosticFrames;
 use App\Services\Gps\Gateway\ProtocolRegistry;
 use App\Services\Gps\Gateway\Protocols\ConcoxX1;
 use App\Services\Gps\Gateway\Protocols\Gt06;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -49,7 +52,7 @@ class Gt06DiagnosticTest extends TestCase
         $registry = app(ProtocolRegistry::class);
         $this->assertNull($registry->detect("\x78\x78"));
         $this->assertSame('gt06', $registry->detect($this->fixture('bt50-user-login'))->name());
-        $this->assertSame('concox-x1', $registry->detect(hex2bin('78781101'))->name());
+        $this->assertSame('concox-x1', $registry->detect(hex2bin('787811010123456789012345A001'))->name());
         $protocol = new Gt06;
         $buffer = substr($this->fixture('bt50-user-login'), 0, 7);
         $this->assertNull($protocol->extract($buffer, false));
@@ -88,13 +91,19 @@ class Gt06DiagnosticTest extends TestCase
         $this->assertSame('', $buffer);
     }
 
-    public function test_real_tcp_diagnostic_process_receives_simulated_packets_and_sends_documented_ack(): void
+    public static function terminalFormats(): array
+    {
+        return [['json'], ['pretty']];
+    }
+
+    #[DataProvider('terminalFormats')]
+    public function test_real_tcp_diagnostic_process_receives_simulated_packets_and_sends_documented_ack(string $format): void
     {
         $reservation = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
         $port = (int) substr(strrchr(stream_socket_get_name($reservation, false), ':'), 1);
         fclose($reservation);
         $process = new Process([PHP_BINARY, 'artisan', 'gps:diagnose', '--host=127.0.0.1', '--port='.$port,
-            '--imei=123456789012345', '--seconds=3'], base_path());
+            '--imei=123456789012345', '--seconds=3', '--format='.$format, '--protocol=gt06'], base_path());
         $socket = null;
         try {
             $process->start();
@@ -104,6 +113,12 @@ class Gt06DiagnosticTest extends TestCase
                     $this->fail('Diagnostic startup failed: '.$process->getOutput());
                 }
                 usleep(20000);
+            }
+            if ($format === 'json') {
+                $duplicate = new Process([PHP_BINARY, 'artisan', 'gps:diagnose', '--host=127.0.0.1', '--port='.$port,
+                    '--seconds=1'], base_path());
+                $this->assertSame(1, $duplicate->run());
+                $this->assertStringContainsString('already running on port', $duplicate->getOutput());
             }
             $socket = stream_socket_client('tcp://127.0.0.1:'.$port, $errno, $error, 3);
             stream_set_timeout($socket, 3);
@@ -124,7 +139,12 @@ class Gt06DiagnosticTest extends TestCase
             $this->assertSame(0, $process->wait());
             $output = $process->getOutput();
             foreach (['CONNECTED', 'DATA_RECEIVED', 'LOGIN', 'ACK_SENT', 'GPS_LOCATION', 'DISCONNECTED'] as $event) {
-                $this->assertStringContainsString('"event":"'.$event.'"', $output);
+                $this->assertStringContainsString($format === 'json' ? '"event":"'.$event.'"' : str_replace('_', ' ', $event), $output);
+            }
+            if ($format === 'pretty') {
+                foreach (['Latitude', 'Longitude', 'Speed (km/h)', 'GPS timestamp (UTC)', 'https://maps.google.com/?q=', 'Raw packet HEX'] as $label) {
+                    $this->assertStringContainsString($label, $output);
+                }
             }
             $this->assertStringContainsString('DIAGNOSTIC ONLY', $output);
         } finally {
@@ -135,5 +155,40 @@ class Gt06DiagnosticTest extends TestCase
                 $process->stop();
             }
         }
+    }
+
+    public function test_device_sim_identifiers_are_formatted_without_inventing_coordinates_or_padding(): void
+    {
+        // Simulated frame from manufacturer's documented 94/0A layout.
+        $body = hex2bin('940A01234567890123450460042429802256898604041018C0002255')."\x00\x01";
+        $data = pack('n', strlen($body) + 2).$body;
+        $frame = "\x79\x79".$data.pack('n', ConcoxX1::crc($data))."\r\n";
+        $buffer = $frame;
+        $this->assertSame($frame, (new Gt06DiagnosticFrames)->extract($buffer));
+        $details = new Gt06DiagnosticDetails;
+        $information = $details->simInformation($frame);
+        $this->assertSame('123456789012345', $information['reported_imei']);
+        $this->assertSame('0460042429802256', $information['imsi_encoded']);
+        $this->assertSame('898604041018C0002255', $information['iccid_encoded']);
+        $this->assertNull($information['coordinates']);
+        $text = (new GpsDiagnosticFormatter)->format('2026-10-16 18:00:00 IST', 'DEVICE_SIM_INFORMATION', $information);
+        $this->assertStringContainsString('Not included in this packet', $text);
+        $this->assertStringNotContainsString('https://maps.google.com', $text);
+        $packet = $details->packet($frame);
+        $this->assertSame('0x94', $packet['type']);
+        $this->assertSame(1, $packet['serial']);
+        $this->assertSame(32, $packet['declared_length']);
+        $this->assertSame(38, $packet['bytes']);
+    }
+
+    public function test_status_and_invalid_fix_output_do_not_claim_a_current_location(): void
+    {
+        $formatter = new GpsDiagnosticFormatter;
+        $text = $formatter->format('time', 'STATUS', ['connected_now' => 0, 'locations' => 0, 'last_valid_fix' => null]);
+        $this->assertStringContainsString('Not received yet - coordinates unavailable', $text);
+        $noFix = $formatter->format('time', 'GPS_NO_FIX', ['latitude' => 0, 'longitude' => 0, 'gps_fix' => false]);
+        $this->assertStringContainsString('NO GPS FIX', $noFix);
+        $this->assertStringNotContainsString('https://maps.google.com', $noFix);
+        $this->assertStringContainsString('No / OFF', $noFix);
     }
 }

@@ -12,6 +12,7 @@ use App\Services\Gps\Gateway\Gateway;
 use App\Services\Gps\Gateway\Location;
 use App\Services\Gps\Gateway\ProtocolRegistry;
 use App\Services\Gps\Gateway\Protocols\ConcoxX1;
+use App\Services\Gps\Gateway\Protocols\Pt06;
 use App\Services\Gps\Gateway\Protocols\Teltonika;
 use App\Services\Gps\HardwareRegistrationService;
 use Carbon\CarbonImmutable;
@@ -70,6 +71,23 @@ class HardwareGpsTest extends TestCase
     private function device(): GpsDevice
     {
         return app(HardwareRegistrationService::class)->save($this->registration());
+    }
+
+    public function test_pt06_registered_profile_resolves_legacy_login_and_persists_pdf_packets(): void
+    {
+        $data = [...$this->registration(), 'identifier' => '864540081540460', 'imei' => '864540081540460',
+            'manufacturer' => 'PT06', 'model' => 'BT50', 'protocol' => 'pt06', 'protocol_version' => Pt06::VERSION];
+        app(HardwareRegistrationService::class)->save($data);
+        $fixture = fn (string $name) => hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/'.$name.'.hex'))));
+        $c = new Connection('127.0.0.1');
+        $gateway = app(Gateway::class);
+        $this->assertSame(hex2bin('787805010001D9DC0D0A'), $gateway->feed($c, $fixture('bt50-user-login')));
+        $this->assertSame('pt06', $c->protocol->name());
+        $this->assertSame($fixture('pt06/pdf-alarm-ack'), $gateway->feed($c, $fixture('pt06/pdf-location').$fixture('pt06/pdf-alarm')));
+        $this->assertSame('', $gateway->feed($c, $fixture('pt06/pdf-location')));
+        $this->assertDatabaseCount('gps_device_locations', 2);
+        $this->assertDatabaseHas('gps_device_locations', ['protocol' => 'pt06', 'speed' => 17]);
+        $this->assertDatabaseHas('gps_device_events', ['type' => 'alarm']);
     }
 
     private function login(): string

@@ -30,7 +30,14 @@ final class ConcoxX1 implements Protocol
             return null;
         }
 
-        return ord($buffer[2]) === 17 && ord($buffer[3]) === 1;
+        if (ord($buffer[2]) !== 17 || ord($buffer[3]) !== 1) {
+            return false;
+        }
+        if (strlen($buffer) < 14) {
+            return null;
+        }
+
+        return substr($buffer, 12, 2) === "\xa0\x01";
     }
 
     public function extract(string &$buffer, bool $authenticated): ?string

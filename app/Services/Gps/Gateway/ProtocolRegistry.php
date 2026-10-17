@@ -36,4 +36,15 @@ final class ProtocolRegistry
 
         throw new InvalidArgumentException('unknown_protocol');
     }
+
+    public function named(string $name): ?Protocol
+    {
+        foreach ($this->adapters as $adapter) {
+            if ($adapter->name() === $name) {
+                return $adapter;
+            }
+        }
+
+        return null;
+    }
 }

@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Services\Gps\Gateway\Connection;
 use App\Services\Gps\Gateway\DeviceAllowlist;
 use App\Services\Gps\Gateway\Gateway;
+use App\Services\Gps\Gateway\TcpListenerLease;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
@@ -12,7 +13,7 @@ use Throwable;
 
 class ListenGpsGateway extends Command
 {
-    protected $signature = 'gps:listen {--host=} {--port=9000} {--cert=} {--key=} {--once} {--mobile} {--diagnostic} {--diagnostic-imei=}';
+    protected $signature = 'gps:listen {--host=} {--port=9000} {--cert=} {--key=} {--once} {--mobile} {--diagnostic} {--diagnostic-imei=} {--format=pretty} {--diagnostic-protocol=pt06}';
 
     protected $description = 'Run the bounded hardware TCP gateway (or legacy TG1 with --mobile / --cert)';
 
@@ -22,7 +23,8 @@ class ListenGpsGateway extends Command
     {
         if ($this->option('diagnostic')) {
             return $this->call('gps:diagnose', ['--host' => $this->option('host') ?: '0.0.0.0',
-                '--port' => $this->option('port'), '--imei' => $this->option('diagnostic-imei') ?: '']);
+                '--port' => $this->option('port'), '--imei' => $this->option('diagnostic-imei') ?: '', '--format' => $this->option('format'),
+                '--protocol' => $this->option('diagnostic-protocol')]);
         }
         // Preserve the existing TLS invocation and all TG1 authentication semantics.
         if ($this->option('mobile') || $this->option('cert')) {
@@ -53,6 +55,13 @@ class ListenGpsGateway extends Command
             Queue::connection(config('gps.queue_connection'))->size(config('gps.queue'));
         } catch (Throwable) {
             $this->error('Redis cache/queue unavailable. Check private Redis connectivity and configuration.');
+
+            return self::FAILURE;
+        }
+        try {
+            $listenerLease = TcpListenerLease::acquire($port);
+        } catch (\RuntimeException $exception) {
+            $this->error($exception->getMessage());
 
             return self::FAILURE;
         }

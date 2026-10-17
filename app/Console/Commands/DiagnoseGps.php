@@ -2,8 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Services\Gps\Gateway\GpsDiagnosticFormatter;
+use App\Services\Gps\Gateway\GpsDiagnosticState;
+use App\Services\Gps\Gateway\Gt06DiagnosticDetails;
 use App\Services\Gps\Gateway\Gt06DiagnosticFrames;
 use App\Services\Gps\Gateway\Protocols\Gt06;
+use App\Services\Gps\Gateway\Protocols\Pt06;
+use App\Services\Gps\Gateway\TcpListenerLease;
 use Illuminate\Console\Command;
 use InvalidArgumentException;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -12,18 +17,27 @@ use Throwable;
 /** Temporary, bounded packet observation. No SQL, Redis, jobs or broadcasts. */
 class DiagnoseGps extends Command
 {
-    protected $signature = 'gps:diagnose {--host=0.0.0.0} {--port=9000} {--imei=} {--seconds=0}';
+    protected $signature = 'gps:diagnose {--host=0.0.0.0} {--port=9000} {--imei=} {--seconds=0} {--format=pretty} {--protocol=pt06}';
 
-    protected $description = 'Observe live TCP connections; documented GT06 ACKs only for the explicit diagnostic IMEI; no production persistence';
+    protected $description = 'Observe PT06/GT06 TCP packets; documented ACKs only for the explicit diagnostic IMEI; no production persistence';
 
-    public function handle(Gt06 $protocol, Gt06DiagnosticFrames $framer): int
+    public function handle(Gt06 $legacyProtocol, Gt06DiagnosticFrames $framer, Gt06DiagnosticDetails $details): int
     {
         $host = (string) $this->option('host');
         $port = filter_var($this->option('port'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]);
         $imei = (string) $this->option('imei');
+        $profile = (string) $this->option('protocol');
+        $protocol = $profile === 'pt06' ? app(Pt06::class) : $legacyProtocol;
         $seconds = filter_var($this->option('seconds'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 86400]]);
-        if (! filter_var($host, FILTER_VALIDATE_IP) || ! $port || $seconds === false || ($imei !== '' && ! preg_match('/^[0-9]{15}$/D', $imei))) {
+        if (! filter_var($host, FILTER_VALIDATE_IP) || ! $port || $seconds === false || ! in_array($profile, ['pt06', 'gt06'], true) || ! in_array($this->option('format'), ['pretty', 'json'], true) || ($imei !== '' && ! preg_match('/^[0-9]{15}$/D', $imei))) {
             $this->error('Use a literal bind IP, valid port, optional 15-digit diagnostic IMEI and duration 0–86400 seconds.');
+
+            return self::FAILURE;
+        }
+        try {
+            $listenerLease = TcpListenerLease::acquire($port);
+        } catch (\RuntimeException $exception) {
+            $this->error($exception->getMessage());
 
             return self::FAILURE;
         }
@@ -36,13 +50,18 @@ class DiagnoseGps extends Command
         }
         stream_set_blocking($server, false);
         $this->info('GPS TCP DIAGNOSTIC LISTENER '.$address);
+        $this->info('Decoder profile: '.$profile.($profile === 'pt06' ? ' / '.Pt06::VERSION : ' / classic 1.8.1'));
+        $this->info('Terminal decoder: decoded-device-summary-v2 (restart required after code updates)');
         $this->warn('DIAGNOSTIC ONLY: no database storage or broadcasts. ACK allowlist: '.($imei ?: 'none; observation only'));
         $this->info('Live connections, bytes, login, heartbeat and location status appear below. Ctrl+C stops.');
         $clients = [];
-        $totals = ['connections' => 0, 'reads' => 0, 'bytes' => 0, 'logins' => 0, 'heartbeats' => 0, 'locations' => 0, 'valid_fixes' => 0];
+        $totals = ['connections' => 0, 'reads' => 0, 'bytes' => 0, 'logins' => 0, 'heartbeats' => 0, 'locations' => 0, 'valid_fixes' => 0,
+            'alarms' => 0, 'lbs_packets' => 0, 'information_packets' => 0, 'unsupported_packets' => 0];
         $started = time();
         $lastStatus = 0;
         $lastData = null;
+        $lastFix = null;
+        $deviceState = new GpsDiagnosticState;
         $close = function (int $id, string $reason) use (&$clients): void {
             if (! isset($clients[$id])) {
                 return;
@@ -120,7 +139,18 @@ class DiagnoseGps extends Command
                                 throw new InvalidArgumentException('frame_limit');
                             }
                             $clients[$id]['packets']++;
-                            if (substr($frame, 0, 2) === "\x79\x79") {
+                            $packetDetails = $details->packet($frame);
+                            $packetContext = ['peer' => $clients[$id]['peer'], 'imei' => $clients[$id]['imei']];
+                            if ($clients[$id]['imei'] === $imei && $imei !== '') {
+                                $this->record('PACKET_DETAILS', [...$packetContext, ...$packetDetails]);
+                            }
+                            if ($profile === 'gt06' && substr($frame, 0, 2) === "\x79\x79") {
+                                $information = $details->simInformation($frame);
+                                if ($clients[$id]['imei'] === $imei && $imei !== '' && $information !== null) {
+                                    $this->record('DEVICE_SIM_INFORMATION', [...$packetContext, ...$information]);
+
+                                    continue;
+                                }
                                 $this->record('EXTENDED_PACKET_CAPTURED', ['peer' => $clients[$id]['peer'],
                                     'imei' => $clients[$id]['imei'], 'type' => $framer->type($frame), 'bytes' => strlen($frame),
                                     'checksum' => 'valid', 'hex' => $clients[$id]['imei'] === $imei ? strtoupper(bin2hex(substr($frame, 0, 256))) : null,
@@ -147,17 +177,35 @@ class DiagnoseGps extends Command
                                     break;
                                 }
                                 $clients[$id]['imei'] = $packet->identifier;
+                                $this->record('PACKET_DETAILS', ['peer' => $clients[$id]['peer'], 'imei' => $packet->identifier, ...$packetDetails]);
                             }
+                            $deviceState->observe($packet, $clients[$id]['imei'], $lastData);
                             if ($packet->type === 'heartbeat') {
                                 $totals['heartbeats']++;
                                 $this->record('HEARTBEAT', ['imei' => $clients[$id]['imei'], ...$packet->events]);
+                            }
+                            if ($packet->events && $packet->type !== 'heartbeat') {
+                                if ($packet->type === 'alarm') {
+                                    $totals['alarms']++;
+                                } elseif ($packet->type === 'lbs') {
+                                    $totals['lbs_packets']++;
+                                } elseif ($packet->type === 'unsupported') {
+                                    $totals['unsupported_packets']++;
+                                } elseif (in_array($packet->type, ['information', 'device_sim_information'], true)) {
+                                    $totals['information_packets']++;
+                                }
+                                $this->record(strtoupper($packet->type).'_DETAILS', ['imei' => $clients[$id]['imei'], ...$packet->events]);
                             }
                             foreach ($packet->locations as $location) {
                                 $totals['locations']++;
                                 if ($location->gpsFix) {
                                     $totals['valid_fixes']++;
+                                    $lastFix = $location->toArray();
                                 }
                                 $this->record($location->gpsFix ? 'GPS_LOCATION' : 'GPS_NO_FIX', ['imei' => $clients[$id]['imei'], ...$location->toArray()]);
+                            }
+                            if (in_array($packet->type, ['heartbeat', 'device_sim_information'], true)) {
+                                $this->record('DEVICE_STATUS', $deviceState->snapshot(true));
                             }
                             if ($packet->ack !== '') {
                                 $clients[$id]['out'] .= $packet->ack;
@@ -192,7 +240,9 @@ class DiagnoseGps extends Command
                     }
                 }
                 if (time() - $lastStatus >= 15) {
-                    $this->record('STATUS', ['connected_now' => count($clients), ...$totals, 'last_data' => $lastData]);
+                    $deviceConnected = $imei !== '' && collect($clients)->contains(fn ($client) => $client['imei'] === $imei);
+                    $this->record('STATUS', ['connected_now' => count($clients), ...$totals, 'last_data' => $lastData, 'last_valid_fix' => $lastFix,
+                        'device' => $deviceState->snapshot($deviceConnected)]);
                     $lastStatus = time();
                 }
             }
@@ -208,7 +258,10 @@ class DiagnoseGps extends Command
 
     private function record(string $event, array $fields): void
     {
-        $this->output->writeln(json_encode(['time' => now()->timezone('Asia/Kolkata')->format('Y-m-d H:i:s T'),
-            'event' => $event, ...$fields], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
+        $time = now()->timezone('Asia/Kolkata')->format('Y-m-d H:i:s T');
+        $text = $this->option('format') === 'json'
+            ? json_encode(['time' => $time, 'event' => $event, ...$fields], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)
+            : app(GpsDiagnosticFormatter::class)->format($time, $event, $fields);
+        $this->output->writeln($text, OutputInterface::OUTPUT_RAW);
     }
 }
