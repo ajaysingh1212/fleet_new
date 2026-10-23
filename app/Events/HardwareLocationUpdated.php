@@ -46,6 +46,8 @@ class HardwareLocationUpdated implements ShouldBroadcast
             'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle'),
             'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
             'acc' => $location->telemetry['acc'] ?? null, 'authorization' => $device->status,
+            'acc_reported' => $location->telemetry['acc'] ?? null,
+            'acc_reported_at' => $location->recorded_at->toIso8601String(), 'acc_source' => 'location',
             'last_packet_at' => $device->last_packet_at?->toIso8601String(), 'idle_seconds' => config('gps.idle_seconds'),
             'latitude' => $location->latitude,
             'longitude' => $location->longitude, 'speed' => $location->speed, 'heading' => $location->heading,

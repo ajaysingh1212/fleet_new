@@ -39,7 +39,15 @@ positions before ACK. It uses no Redis or broadcasts; the admin map polls the
 authenticated fleet endpoint every five seconds. SQL errors cause disconnect
 without ACK. It is a bounded local troubleshooting mode, with blocking SQL in
 its loop; production deployments should continue using the Redis gateway/worker.
-Without `--persist`, diagnostics remain observation-only as before.
+With the default configuration, diagnostics without `--persist` remain observation-only.
+
+For a local terminal that must always update the map, set
+`GPS_DIAGNOSTIC_PERSIST=true` in the local `.env` and restart the listener.
+This applies to `gps:listen --diagnostic`, including restarts without `--persist`.
+Only active registrations with matching protocol/version can be stored.
+Use `--observe-only` to explicitly disable storage for a diagnostic session.
+The default setting remains false; `gps:diagnose` itself remains observation-only
+unless passed `--persist`. Database storage does not enable file logging.
 
 `tools/start-gps-live.ps1` uses this storage mode and mirrors output to
 `storage/logs/gps-live-diagnostic.log`. `php tools/gps-fleet-status.php` provides
@@ -54,10 +62,12 @@ only display telemetry, excluding SIM details and device configuration. Existing
 private Reverb position events are also supported for the production gateway.
 
 Bike and car markers show registration, driver, coordinates and fix time. The
-map does not reload or recenter on every packet. Markers interpolate between
-measured positions over 1–8 seconds; animation resumes from the current displayed
-position when a newer fix arrives. It does not extrapolate motion beyond the
-latest fix. Old retransmissions cannot rewind a marker. Reassignment clears old
+map does not reload or recenter on every packet. The browser polls every second.
+Markers use frame-based Hermite interpolation with 0.4–1.6 second catch-up,
+retaining their position and compatible velocity when a newer fix arrives.
+There is no playback queue or extrapolation beyond the latest measured fix.
+Unchanged polls do not rebuild marker icons, and popup updates do not pan the map.
+Old retransmissions cannot rewind a marker. Reassignment clears old
 vehicle markers and never borrows an earlier vehicle's fix.
 
 States: moving (>1.8 km/h); idle (stationary with ACC on); parked (ACC off);
@@ -67,6 +77,13 @@ measurement supplies ignition status even when the old fix was retransmitted.
 Communication freshness and GPS freshness expire separately after the configured
 idle timeout (180 seconds by default). Last known coordinates remain visible
 with their timestamp and stale/offline status.
+
+The roster, table and popup show connection separately from movement and GPS age.
+Recent packets keep a tracker Online even when its measured GPS point is delayed.
+Delayed speed is labelled Last reported moving/stopped rather than current motion.
+ACC carries its own source and report timestamp; expired ignition is Unknown with
+the last reported value shown separately. Movement never fabricates an ACC-ON bit.
+Expired heartbeat fix flags do not override current GPS evidence.
 
 Validation: isolated SQLite hardware tests cover idempotent seeding, actual capture
 decoding, assignment, local persistence, revoked registrations, fleet pagination,

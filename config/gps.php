@@ -16,6 +16,8 @@ return [
     'max_buffer' => 65536,
     'max_frame' => 16384,
     'idle_seconds' => 180,
+    // Local installations may keep terminal diagnostics and the fleet map in sync.
+    'diagnostic_persist' => (bool) env('GPS_DIAGNOSTIC_PERSIST', false),
     'pending_diagnostics' => (bool) env('GPS_PENDING_DIAGNOSTICS', false),
     'diagnostic_days' => 7,
     'location_days' => 90,

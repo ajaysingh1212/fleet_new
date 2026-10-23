@@ -31,8 +31,19 @@ final class HardwareFleet
         // A retransmitted old GPS fix must not overwrite a newer ignition report.
         $heartbeatNewer = $heartbeat && (! $position || $heartbeat->received_at > $position->recorded_at->format('Y-m-d H:i:s'));
         $acc = $heartbeatNewer ? ($telemetry['acc'] ?? $positionAcc) : ($positionAcc ?? $telemetry['acc'] ?? null);
+        $accFromHeartbeat = $heartbeatNewer ? isset($telemetry['acc']) : ! isset($positionAcc);
+        $accReportedAt = $accFromHeartbeat && $heartbeat
+            ? \Carbon\CarbonImmutable::parse($heartbeat->received_at, 'UTC') : $position?->recorded_at;
+        $accFresh = $acc !== null && $accReportedAt?->gte(now()->subSeconds(config('gps.idle_seconds')));
+        $reportedAcc = $acc;
+        // An old ignition report is historical evidence, not current ignition.
+        if (! $accFresh) {
+            $acc = null;
+        }
         $fresh = $position && $position->recorded_at->gte(now()->subSeconds(config('gps.idle_seconds')));
-        $reportedFix = $heartbeatNewer ? ($telemetry['gps_positioned_reported'] ?? null) : null;
+        $heartbeatFresh = $heartbeat && \Carbon\CarbonImmutable::parse($heartbeat->received_at, 'UTC')
+            ->gte(now()->subSeconds(config('gps.idle_seconds')));
+        $reportedFix = $heartbeatNewer && $heartbeatFresh ? ($telemetry['gps_positioned_reported'] ?? null) : null;
         $state = $device->status !== 'active' ? $device->status : (! $device->is_online ? 'offline' :
             (! $position ? 'awaiting_gps' : ($reportedFix === false ? 'no_gps_fix' : (! $fresh ? 'stale_gps' :
                 ($position->speed === null ? 'unknown' : ($position->speed > 1.8 ? 'moving' : ($acc === true ? 'idle' : ($acc === false ? 'parked' : 'stopped'))))))));
@@ -45,6 +56,8 @@ final class HardwareFleet
             'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
             'authorization' => $device->status, 'online' => $device->is_online, 'state' => $state,
             'last_packet_at' => $device->last_packet_at?->toIso8601String(), 'acc' => $acc,
+            'acc_reported' => $reportedAcc, 'acc_reported_at' => $accReportedAt?->toIso8601String(),
+            'acc_source' => $acc === null && $reportedAcc === null ? null : ($accFromHeartbeat ? 'heartbeat' : 'location'),
             'gps_fresh' => (bool) $fresh, 'gps_positioned_reported' => $reportedFix, 'idle_seconds' => config('gps.idle_seconds')];
     }
 }

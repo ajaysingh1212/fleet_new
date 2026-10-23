@@ -138,6 +138,39 @@ class HardwareGpsTest extends TestCase
         $recorder->record($packet, 'blocked-position', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
     }
 
+    public function test_delayed_gps_does_not_hide_connectivity_or_present_expired_ignition_as_current(): void
+    {
+        $this->seed(HardwareFleetSeeder::class);
+        $device = GpsDevice::where('identifier', '864540081540460')->firstOrFail();
+        $recorder = app(LocalHardwareRecorder::class);
+        $fleet = app(HardwareFleet::class);
+        $c = new Connection('127.0.0.1');
+        $position = new Location(25.6, 85.1, CarbonImmutable::now('UTC'), 6, 0,
+            gpsFix: true, telemetry: ['acc' => true]);
+        $recorder->record(new Packet('location', null, Pt06::VERSION, locations: [$position]),
+            'moving-on', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $this->travel(2)->seconds();
+        $recorder->record(new Packet('heartbeat', null, Pt06::VERSION,
+            events: ['acc' => false, 'gps_positioned_reported' => true]),
+            'newer-off', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $data = $fleet->device($device->fresh());
+        $this->assertSame('moving', $data['state']);
+        $this->assertFalse($data['acc']);
+        $this->assertSame('heartbeat', $data['acc_source']);
+        $this->travel(181)->seconds();
+        // The connection receives an old position; the heartbeat itself is expired.
+        $recorder->record(new Packet('location', null, Pt06::VERSION, locations: [$position]),
+            'delayed-replay', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
+        $data = $fleet->device($device->fresh());
+        $this->assertTrue($data['online']);
+        $this->assertSame('stale_gps', $data['state']);
+        $this->assertNull($data['acc']);
+        $this->assertFalse($data['acc_reported']);
+        $this->assertNotNull($data['acc_reported_at']);
+        $this->assertNull($data['gps_positioned_reported']);
+        $this->assertFalse($data['gps_fresh']);
+    }
+
     public function test_pt06_registered_profile_resolves_legacy_login_and_persists_pdf_packets(): void
     {
         $data = [...$this->registration(), 'identifier' => '864540081540460', 'imei' => '864540081540460',
