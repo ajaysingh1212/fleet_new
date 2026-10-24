@@ -7,6 +7,9 @@ use App\Services\RelationshipAuthorizationService;
 use Illuminate\Support\Facades\Broadcast;
 
 Broadcast::channel('admin.gps.hardware', fn ($user) => $user->can('viewAny', GpsDevice::class));
+Broadcast::channel('admin.gps.alerts', fn ($user) => $user->can('viewAny', GpsDevice::class));
+Broadcast::channel('admin.gps.hardware.device.{id}', fn ($user, $id) => $user->can('viewAny', GpsDevice::class)
+    && ctype_digit((string) $id) && GpsDevice::whereKey($id)->exists());
 
 Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
     if ((int) $user->id === (int) $id) {

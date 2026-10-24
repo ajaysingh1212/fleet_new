@@ -19,6 +19,9 @@ class HardwareRegistrationService
         // SQL is authoritative. Unique constraints and assignment row locks
         // protect registration independently of gateway/cache availability.
         $saved = $this->persist($data, $device);
+        if (config('gps.live_first')) {
+            app(HardwareLiveState::class)->forget($saved->id);
+        }
         try {
             app(DeviceAllowlist::class)->syncCurrent($saved->id, $oldIdentifier);
         } catch (PredisException|\RedisException|LockTimeoutException) {

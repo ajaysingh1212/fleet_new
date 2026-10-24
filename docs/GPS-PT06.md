@@ -19,6 +19,16 @@ reconfigured. Legacy IMEI-only logins are resolved against the active registrati
 | 21 | 6.2, p. 30 | Server flag and ASCII or UTF-16BE response | None specified |
 | 2A | 7, pp. 36–37 | GPS, 21-byte phone field preserved verbatim and in HEX, language | Requires address service; no fabricated address |
 
+Location ACK compatibility: the supplied manual does not specify a reply for
+0x22, but the GT06-compatible receiver now sends a CRC-protected, serial-matched
+0x22 ACK by default, as Traccar's GT06 decoder does. On 23 October the real device
+repeatedly sent three retransmitted positions then closed the connection, with
+GPS timestamps many minutes behind server receipt. Missing location ACKs are a
+compatibility hypothesis; a real-device drive must confirm whether this stops
+the reconnect/backlog pattern. Set `GPS_PT06_LOCATION_ACK=false` for the original
+manual-only behavior. Authentication, CRC and durable acceptance still precede
+the response. No reporting interval or device configuration command is sent.
+
 Framing accepts `7878` one-byte length and `7979` two-byte length. Both validate
 declared length, CRLF and CRC-ITU/X25 before decoding. Short and extended packets
 can be fragmented across TCP reads or coalesced in one read. Outbound commands
@@ -75,7 +85,7 @@ longitude, satellite count, speed or cell-tower measurements.
 terminal output to `storage/logs/gps-live-diagnostic.log`; see GPS-FLEET.md.
 Default diagnostic mode uses no Redis or database and does not store/broadcast
 positions. `--persist --registered` enables SQL storage for active registrations
-and admin-map polling without Redis. Production mode still requires Redis and
+and queued WebSocket map updates without Redis; run the broadcast worker and Reverb as described in GPS-REALTIME.md. Production mode still requires Redis and
 the hardware queue worker described in GPS-IMPLEMENTATION.md.
 
 ## Validation and generated files

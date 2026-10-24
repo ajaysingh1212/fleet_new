@@ -51,8 +51,11 @@ class ProcessHardwarePacket implements ShouldQueue
             DB::table('gps_connection_sessions')->where('id', $this->sessionId)
                 ->where('last_packet_at', '<', $this->receivedAt)->update(['last_packet_at' => $this->receivedAt]);
             $changes = [];
+            $eventsInserted = 0;
+            $newLocation = false;
+            $monitorLocations = [];
             if ($this->events) {
-                DB::table('gps_device_events')->insertOrIgnore([
+                $eventsInserted = DB::table('gps_device_events')->insertOrIgnore([
                     'gps_device_id' => $device->id, 'packet_hash' => $this->hash, 'type' => $this->type,
                     'telemetry' => json_encode($this->events, JSON_THROW_ON_ERROR), 'received_at' => $this->receivedAt,
                 ]);
@@ -73,6 +76,8 @@ class ProcessHardwarePacket implements ShouldQueue
                     'gps_device_id' => $device->id, 'packet_hash' => $this->hash, 'record_index' => $index,
                 ], [...$data, 'vehicle_id' => $this->vehicleId, 'protocol' => $this->protocol,
                     'protocol_version' => $this->version, 'received_at' => $this->receivedAt]);
+                $newLocation = $newLocation || $location->wasRecentlyCreated;
+                if ($location->wasRecentlyCreated) $monitorLocations[] = $data;
                 if ($location->wasRecentlyCreated && (! $latest || $location->recorded_at->gt($latest->recorded_at))) {
                     $latest = $location;
                     $changes['latest_location_id'] = $location->id;
@@ -80,8 +85,12 @@ class ProcessHardwarePacket implements ShouldQueue
             }
             // Communication telemetry should not pollute the administrative audit log.
             $device->forceFill($changes)->saveQuietly();
-            if ($this->broadcast && $latest && $latest->packet_hash === $this->hash && $this->locations) {
-                $payload = HardwareLocationUpdated::payload($device, $latest);
+            usort($monitorLocations, fn($a,$b)=>strcmp($a['recorded_at'],$b['recorded_at']));
+            foreach ($monitorLocations as $data) app(\App\Services\Geofence\VehicleGeofenceMonitor::class)->evaluate($device, $data);
+            if ($this->broadcast && ($eventsInserted || $newLocation || $device->wasChanged(['last_connected_at', 'last_packet_at', 'latest_location_id', 'remote_ip']))) {
+                // Heartbeats/login update connection and ignition even when
+                // the tracker is parked and has no new coordinate packet.
+                $payload = ['device_id' => $device->id];
                 DB::afterCommit(fn () => HardwareLocationUpdated::dispatch($payload));
             }
         }, 3);

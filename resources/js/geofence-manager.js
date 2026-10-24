@@ -19,6 +19,12 @@ class GeofenceManager {
         this.mapEl = document.getElementById('geofence-map');
         if (!this.mapEl) return;
 
+        this.hardwareMode = this.mapEl.dataset.hardwareMode === '1';
+        this.targetPage = 1;
+        this.targetLastPage = 1;
+        this.targetRequest = 0;
+        this.selectedTarget = '';
+        this.targetLabels = new Map();
         this.listEl = document.getElementById('geofence-list');
         this.listEmptyEl = document.getElementById('geofence-list-empty');
         this.searchEl = document.getElementById('geofence-search');
@@ -52,6 +58,23 @@ class GeofenceManager {
         this._bindEvents();
         this._loadGeofences();
         this._loadUsers();
+        if (this.hardwareMode) {
+            const fields = document.getElementById('geofence-create-assignment-fields');
+            [...fields.children].slice(1).forEach(el => el.classList.add('d-none'));
+            fields.firstElementChild.className = 'col-12';
+            document.getElementById('geofence-target-search')?.addEventListener('input', () => {
+                clearTimeout(this.targetSearchTimer);
+                this.targetSearchTimer = setTimeout(() => { this.targetPage = 1; this._loadTargets(); }, 250);
+            });
+            for (const [id, delta] of [['prev', -1], ['next', 1]]) {
+                document.getElementById(`geofence-target-${id}`)?.addEventListener('click', () => {
+                    this.targetPage += delta; this._loadTargets();
+                });
+            }
+            document.getElementById('geofence-create-user').addEventListener('change', event => {
+                this.selectedTarget = event.target.value;
+            });
+        }
     }
 
     _populateCategoryOptions() {
@@ -175,8 +198,15 @@ class GeofenceManager {
         document.getElementById('geofence-color-input').value = existing?.color ?? '#38bdf8';
         document.getElementById('geofence-min-speed-input').value = existing?.min_speed_kmh ?? '';
         document.getElementById('geofence-max-speed-input').value = existing?.max_speed_kmh ?? '';
-        document.getElementById('geofence-create-assignment-fields')?.classList.toggle('d-none', Boolean(existing));
-        this._resetCreateAssignmentFields();
+        document.getElementById('geofence-create-assignment-fields')?.classList.toggle('d-none', Boolean(existing) && !this.hardwareMode);
+        if (!this.hardwareMode) this._resetCreateAssignmentFields();
+        if (this.hardwareMode) {
+            this.selectedTarget = existing ? (existing.gps_device_id ? `device:${existing.gps_device_id}` : `vehicle:${existing.vehicle_id}`) : '';
+            if (existing) this.targetLabels.set(this.selectedTarget, `${existing.registration ?? 'Unassigned'} ? ${existing.imei ? 'IMEI ' + existing.imei : 'Vehicle rule'}`);
+            this.targetPage = 1;
+            document.getElementById('geofence-target-search').value = '';
+            this._loadTargets();
+        }
 
         const statusEl = document.getElementById('geofence-details-status');
         statusEl.classList.add('d-none');
@@ -209,7 +239,17 @@ class GeofenceManager {
         };
 
         try {
-            if (this.editingExisting) {
+            if (this.hardwareMode) {
+                const [kind, id] = document.getElementById('geofence-create-user').value.split(':');
+                if (!id) throw new Error('Please select a vehicle / IMEI.');
+                const existing = this.editingExisting;
+                const geometry = existing ? this._hardwarePayload(existing) : { type: this.pendingShape.type, ...this.pendingShape.geometry };
+                const target = { vehicle_id: null, gps_device_id: null, [kind === 'device' ? 'gps_device_id' : 'vehicle_id']: Number(id) };
+                const body = { ...geometry, ...payload, ...target };
+                if (existing) await window.axios.put(`/admin/vehicle-geofences/${existing.rule_id}`, body);
+                else await window.axios.post('/admin/vehicle-geofences', body);
+                if (this.pendingShape) this.drawnItems.removeLayer(this.pendingShape.layer);
+            } else if (this.editingExisting) {
                 payload.type = this.editingExisting.type;
 
                 if (this.editingExisting.type === 'circle') {
@@ -235,7 +275,7 @@ class GeofenceManager {
             this.detailsModal.hide();
             await this._loadGeofences();
         } catch (error) {
-            statusEl.textContent = error.response?.data?.message ?? 'Could not save the geofence. Please check the details.';
+            statusEl.textContent = error.response?.data?.message ?? error.message ?? 'Could not save the geofence. Please check the details.';
             statusEl.classList.remove('d-none');
         }
     }
@@ -290,7 +330,7 @@ class GeofenceManager {
         if (this.categoryFilterEl?.value) params.category = this.categoryFilterEl.value;
         if (this.statusFilterEl?.value) params.status = this.statusFilterEl.value;
 
-        const { data } = await window.axios.get('/api/v1/geofences', { params });
+        const data = this.hardwareMode ? { data: await this._hardwareFences(params) } : (await window.axios.get('/api/v1/geofences', { params })).data;
 
         this.geofences.clear();
         this.drawnItems.clearLayers();
@@ -334,7 +374,7 @@ class GeofenceManager {
 
     _renderList() {
         const term = (this.searchEl?.value ?? '').toLowerCase();
-        const rows = Array.from(this.geofences.values()).filter((g) => !term || g.name.toLowerCase().includes(term));
+        const rows = Array.from(this.geofences.values()).filter((g) => !term || [g.name, g.registration, g.imei].some(value => value?.toLowerCase().includes(term)));
 
         this.listEmptyEl?.classList.toggle('d-none', rows.length > 0);
         this.listEl.replaceChildren();
@@ -346,6 +386,7 @@ class GeofenceManager {
                 <div class="tracker-geofence-row-swatch" style="background:${escapeHtml(geofence.color)}"></div>
                 <div class="tracker-geofence-row-body">
                     <strong>${escapeHtml(geofence.name)}</strong>
+                    ${this.hardwareMode ? `<div class="text-muted small">${escapeHtml(geofence.registration ?? 'Unassigned')} ${escapeHtml(geofence.imei ? '? IMEI ' + geofence.imei : '')}</div>` : ''}
                     <div class="text-muted small">${escapeHtml(geofence.category_label)} • ${escapeHtml(geofence.type)}</div>
                 </div>
                 <span class="tracker-status-pill ${geofence.status === 'active' ? 'tracker-status-active' : ''}">${escapeHtml(geofence.status)}</span>
@@ -356,7 +397,7 @@ class GeofenceManager {
                     <ul class="dropdown-menu dropdown-menu-end">
                         <li><button class="dropdown-item" type="button" data-action="edit-details">Edit details</button></li>
                         <li><button class="dropdown-item" type="button" data-action="edit-shape">Edit shape</button></li>
-                        <li><button class="dropdown-item" type="button" data-action="assign">Assign to user</button></li>
+                        <li><button class="dropdown-item" type="button" data-action="assign">${this.hardwareMode ? 'Change vehicle / IMEI' : 'Assign to user'}</button></li>
                         <li><button class="dropdown-item" type="button" data-action="duplicate">Duplicate</button></li>
                         <li><button class="dropdown-item" type="button" data-action="toggle-status">${geofence.status === 'active' ? 'Deactivate' : 'Activate'}</button></li>
                         <li><button class="dropdown-item" type="button" data-action="archive-toggle">${geofence.status === 'archived' ? 'Restore' : 'Archive'}</button></li>
@@ -373,7 +414,7 @@ class GeofenceManager {
 
             row.querySelector('[data-action="edit-details"]').addEventListener('click', () => this._openDetailsModal(geofence));
             row.querySelector('[data-action="edit-shape"]').addEventListener('click', () => this._startShapeEdit(geofence));
-            row.querySelector('[data-action="assign"]').addEventListener('click', () => this._openAssignmentModal(geofence));
+            row.querySelector('[data-action="assign"]').addEventListener('click', () => this.hardwareMode ? this._openDetailsModal(geofence) : this._openAssignmentModal(geofence));
             row.querySelector('[data-action="duplicate"]').addEventListener('click', () => this._duplicateGeofence(geofence));
             row.querySelector('[data-action="toggle-status"]').addEventListener('click', () => this._toggleActiveStatus(geofence));
             row.querySelector('[data-action="archive-toggle"]').addEventListener('click', () => this._toggleArchiveStatus(geofence));
@@ -396,25 +437,28 @@ class GeofenceManager {
 
     async _toggleActiveStatus(geofence) {
         const action = geofence.status === 'active' ? 'deactivate' : 'activate';
-        await window.axios.post(`/api/v1/geofences/${geofence.uuid}/${action}`);
+        if (this.hardwareMode) await window.axios.patch(`/admin/vehicle-geofences/${geofence.rule_id}/status`, { status: action === 'activate' ? 'active' : 'inactive' });
+        else await window.axios.post(`/api/v1/geofences/${geofence.uuid}/${action}`);
         await this._loadGeofences();
     }
 
     async _toggleArchiveStatus(geofence) {
         const action = geofence.status === 'archived' ? 'restore' : 'archive';
-        await window.axios.post(`/api/v1/geofences/${geofence.uuid}/${action}`);
+        if (this.hardwareMode) await window.axios.patch(`/admin/vehicle-geofences/${geofence.rule_id}/status`, { status: action === 'restore' ? 'active' : 'archived' });
+        else await window.axios.post(`/api/v1/geofences/${geofence.uuid}/${action}`);
         await this._loadGeofences();
     }
 
     async _duplicateGeofence(geofence) {
-        await window.axios.post(`/api/v1/geofences/${geofence.uuid}/duplicate`);
+        if (this.hardwareMode) await window.axios.post('/admin/vehicle-geofences', { ...this._hardwarePayload(geofence), name: `${geofence.name} (copy)` });
+        else await window.axios.post(`/api/v1/geofences/${geofence.uuid}/duplicate`);
         await this._loadGeofences();
     }
 
     async _deleteGeofence(geofence) {
         if (!confirm(`Delete "${geofence.name}"? This cannot be undone from here.`)) return;
 
-        await window.axios.delete(`/api/v1/geofences/${geofence.uuid}`);
+        await window.axios.delete(this.hardwareMode ? `/admin/vehicle-geofences/${geofence.rule_id}` : `/api/v1/geofences/${geofence.uuid}`);
         await this._loadGeofences();
     }
 
@@ -447,7 +491,8 @@ class GeofenceManager {
         this.editToolbar?.disable();
         this.editBarEl?.classList.add('d-none');
 
-        await window.axios.patch(`/api/v1/geofences/${this.editingUuid}`, {
+        if (this.hardwareMode) await window.axios.put(`/admin/vehicle-geofences/${geofence.rule_id}`, { ...this._hardwarePayload(geofence), ...geometry });
+        else await window.axios.patch(`/api/v1/geofences/${this.editingUuid}`, {
             name: geofence.name,
             description: geofence.description,
             category: geofence.category,
@@ -462,7 +507,7 @@ class GeofenceManager {
     }
 
     async _exportGeofences() {
-        const response = await window.axios.get('/api/v1/geofences/export');
+        const response = this.hardwareMode ? { data: { geofences: await this._hardwareFences({}) } } : await window.axios.get('/api/v1/geofences/export');
         const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
 
@@ -489,16 +534,66 @@ class GeofenceManager {
                 return;
             }
 
-            await window.axios.post('/api/v1/geofences/import', { geofences });
+            if (this.hardwareMode) {
+                for (const geofence of geofences) await window.axios.post('/admin/vehicle-geofences', this._hardwarePayload(geofence));
+            } else await window.axios.post('/api/v1/geofences/import', { geofences });
             await this._loadGeofences();
         } catch (error) {
             alert('Could not import this file. Please make sure it is a valid geofence export.');
         }
     }
 
+    _hardwarePayload(fence) {
+        return {
+            name: fence.name, description: fence.description, category: fence.category, color: fence.color,
+            min_speed_kmh: fence.min_speed_kmh, max_speed_kmh: fence.max_speed_kmh, type: fence.type,
+            ...(fence.type === 'circle' ? { center_lat: fence.center_lat, center_lng: fence.center_lng, radius_meters: fence.radius_meters } : { points: fence.points }),
+            vehicle_id: fence.gps_device_id ? null : fence.vehicle_id,
+            gps_device_id: fence.gps_device_id ?? null,
+        };
+    }
+
+    async _hardwareFences(params) {
+        const items = [];
+        let page = 1, last = 1;
+        do {
+            const { data } = await window.axios.get('/admin/vehicle-geofences', { params: { ...params, per_page: 250, page } });
+            items.push(...data.data); last = data.last_page; page++;
+        } while (page <= last);
+        return items;
+    }
+
+    async _loadTargets() {
+        const version = ++this.targetRequest;
+        const select = document.getElementById('geofence-create-user');
+        const status = document.getElementById('geofence-target-page');
+        try {
+            const { data } = await window.axios.get('/admin/vehicle-geofences/targets', { params: { q: document.getElementById('geofence-target-search').value, page: this.targetPage } });
+            if (version !== this.targetRequest) return;
+            this.targetLastPage = data.last_page;
+            select.replaceChildren(new Option('Select vehicle / IMEI', ''));
+            for (const target of data.data) {
+                const value = `device:${target.id}`;
+                const label = `${target.registration_number ?? 'Unassigned'} ? IMEI ${target.imei}`;
+                this.targetLabels.set(value, label);
+                select.append(new Option(label, value));
+            }
+            if (this.selectedTarget && ![...select.options].some(o => o.value === this.selectedTarget)) {
+                select.append(new Option(this.targetLabels.get(this.selectedTarget) ?? this.selectedTarget, this.selectedTarget));
+            }
+            select.value = this.selectedTarget;
+            status.textContent = `${data.current_page} / ${data.last_page}`;
+            document.getElementById('geofence-target-prev').disabled = data.current_page <= 1;
+            document.getElementById('geofence-target-next').disabled = data.current_page >= data.last_page;
+        } catch {
+            if (version === this.targetRequest) status.textContent = 'Could not load trackers. Search again to retry.';
+        }
+    }
+
     // ---------- Assignments (schedule + compliance) ----------
 
     async _loadUsers() {
+        if (this.hardwareMode) return this._loadTargets();
         try {
             const { data } = await window.axios.get('/api/v1/geofences/trackable-users');
             this.users = data.data ?? [];

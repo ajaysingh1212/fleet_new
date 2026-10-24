@@ -34,10 +34,11 @@ php artisan gps:listen --diagnostic --persist --registered --diagnostic-protocol
 `--registered` accepts newly registered active trackers without changing the
 command or restarting. Unknown and inactive identifiers receive no ACK.
 The explicit `--persist` mode checks each device's active registration, protocol
-and version in SQL, then stores packet events, communication times and valid
-positions before ACK. It uses no Redis or broadcasts; the admin map polls the
-authenticated fleet endpoint every five seconds. SQL errors cause disconnect
-without ACK. It is a bounded local troubleshooting mode, with blocking SQL in
+and version in SQL, then journals the packet before ACK. With live-first mode,
+the live worker publishes decoded state before the separate history worker saves
+packet events, communication times and valid positions. It uses no Redis locally; queued WebSocket events update
+the map through Reverb and a dedicated broadcast worker (see GPS-REALTIME.md). SQL errors cause disconnect
+without ACK. It is a bounded local troubleshooting mode, with registration and queue SQL in
 its loop; production deployments should continue using the Redis gateway/worker.
 With the default configuration, diagnostics without `--persist` remain observation-only.
 
@@ -55,18 +56,19 @@ a read-only snapshot of the configured application database.
 
 ## Admin map
 
-Open `/admin/gps-devices`. Its map/roster includes all registered trackers and
-vehicles, independent of the table's 25-row pagination or table search filters.
-New registrations appear on the next poll. The authenticated endpoint returns
-only display telemetry, excluding SIM details and device configuration. Existing
-private Reverb position events are also supported for the production gateway.
+Open `/admin/gps-devices`. The map loads at most 250 matching devices,
+independent of the table's 25-row pagination. Search/protocol/status filters
+apply to both. Next/Previous navigates the bounded map pages; Sync now discovers
+registration changes. The authenticated endpoint and private per-device Reverb
+channels return only display telemetry, excluding SIM details and configuration.
+See [GPS-REALTIME.md](GPS-REALTIME.md) for startup, delivery and scaling details.
 
 Bike and car markers show registration, driver, coordinates and fix time. The
-map does not reload or recenter on every packet. The browser polls every second.
+map does not reload or recenter on every packet. Device changes arrive through WebSockets; there is no periodic fleet polling.
 Markers use frame-based Hermite interpolation with 0.4–1.6 second catch-up,
 retaining their position and compatible velocity when a newer fix arrives.
 There is no playback queue or extrapolation beyond the latest measured fix.
-Unchanged polls do not rebuild marker icons, and popup updates do not pan the map.
+Unchanged reports do not rebuild marker icons, and popup updates do not pan the map.
 Old retransmissions cannot rewind a marker. Reassignment clears old
 vehicle markers and never borrows an earlier vehicle's fix.
 

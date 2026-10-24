@@ -55,7 +55,7 @@
         </aside>
 
         <div class="tracker-geofence-map-wrap">
-            <div id="geofence-map" class="tracker-geofence-map"></div>
+            <div id="geofence-map" class="tracker-geofence-map" data-hardware-mode="{{ $hardwareMode ? '1' : '0' }}"></div>
             <div class="tracker-geofence-draw-hint d-none" id="geofence-draw-hint">
                 Draw the shape on the map — the details form will open once you finish.
             </div>
@@ -105,15 +105,26 @@
                             <input type="number" min="0" max="300" class="form-control" id="geofence-max-speed-input" placeholder="No limit">
                         </div>
                         <div class="col-12">
-                            <p class="tracker-card-subtitle mb-0">Speeding inside this zone alerts both the tracked person and whoever tracks them, in realtime.</p>
+                            <p class="tracker-card-subtitle mb-0">{{ $hardwareMode ? 'Boundary and speed violations appear in realtime on the GPS fleet map.' : 'Speeding inside this zone alerts both the tracked person and whoever tracks them, in realtime.' }}</p>
                         </div>
                     </div>
                     <hr>
-                    <h6 class="mb-2">Assign routine while creating</h6>
+                    <h6 class="mb-2">{{ $hardwareMode ? 'Assign vehicle / IMEI' : 'Assign routine while creating' }}</h6>
                     <div class="row g-2" id="geofence-create-assignment-fields">
                         <div class="col-6">
-                            <label class="tracker-form-label">Tracked user</label>
+                            <label class="tracker-form-label">{{ $hardwareMode ? 'Vehicle / IMEI' : 'Tracked user' }}</label>
+                            @if($hardwareMode)
+                                <input type="search" class="form-control form-control-sm mb-2" id="geofence-target-search" placeholder="Search vehicle or IMEI" aria-label="Search vehicle or IMEI">
+                            @endif
                             <select class="form-select form-select-sm" id="geofence-create-user"></select>
+                            @if($hardwareMode)
+                                <div class="d-flex align-items-center gap-2 mt-2">
+                                    <button type="button" class="btn tracker-outline-btn btn-sm" id="geofence-target-prev" aria-label="Previous trackers">Previous</button>
+                                    <small id="geofence-target-page" aria-live="polite"></small>
+                                    <button type="button" class="btn tracker-outline-btn btn-sm" id="geofence-target-next" aria-label="Next trackers">Next</button>
+                                </div>
+                                <small class="text-muted">Select an IMEI even if no vehicle is linked. Monitoring is always active while this geofence is enabled.</small>
+                            @endif
                         </div>
                         <div class="col-4">
                             <label class="tracker-form-label">Route label</label>

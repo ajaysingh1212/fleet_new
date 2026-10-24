@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\CloseHardwareSession;
 use App\Services\Gps\Gateway\GpsDiagnosticFormatter;
 use App\Services\Gps\Gateway\GpsDiagnosticState;
 use App\Services\Gps\Gateway\Gt06DiagnosticDetails;
@@ -12,17 +13,18 @@ use App\Services\Gps\Gateway\TcpListenerLease;
 use App\Services\Gps\LocalHardwareRecorder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 
-/** Temporary, bounded packet observation. No SQL, Redis, jobs or broadcasts. */
+/** Bounded packet observation; optional registered SQL storage and queued broadcasts. */
 class DiagnoseGps extends Command
 {
-    protected $signature = 'gps:diagnose {--host=0.0.0.0} {--port=9000} {--imei= : Comma-separated diagnostic IMEIs (up to 32)} {--seconds=0} {--format=pretty} {--protocol=pt06} {--persist : Store registered devices locally in SQL; map polls without Redis} {--registered : Accept all active SQL registrations with --persist}';
+    protected $signature = 'gps:diagnose {--host=0.0.0.0} {--port=9000} {--imei= : Comma-separated diagnostic IMEIs (up to 32)} {--seconds=0} {--format=pretty} {--protocol=pt06} {--persist : Journal registered packets; live-first updates and background history} {--registered : Accept all active SQL registrations with --persist}';
 
-    protected $description = 'Observe PT06/GT06 TCP packets; documented ACKs only for the explicit diagnostic IMEI; no production persistence';
+    protected $description = 'Observe PT06/GT06 TCP packets with optional registered SQL storage and queued fleet updates';
 
     public function handle(Gt06 $legacyProtocol, Gt06DiagnosticFrames $framer, Gt06DiagnosticDetails $details): int
     {
@@ -57,7 +59,7 @@ class DiagnoseGps extends Command
         $this->info('GPS TCP DIAGNOSTIC LISTENER '.$address);
         $this->info('Decoder profile: '.$profile.($profile === 'pt06' ? ' / '.Pt06::VERSION : ' / classic 1.8.1'));
         $this->info('Terminal decoder: decoded-device-summary-v2 (restart required after code updates)');
-        $this->warn(($this->option('persist') ? 'LOCAL STORAGE ENABLED: active SQL registrations required; map polling; no broadcasts.' : 'DIAGNOSTIC ONLY: no database storage or broadcasts.').' ACK allowlist: '.($this->option('registered') ? 'all active SQL registrations (checked for every packet)' : ($imei ?: 'none; observation only')));
+        $this->warn(($this->option('persist') ? 'LOCAL STORAGE ENABLED: active SQL registrations required; '.(config('gps.local_broadcast') ? 'queued WebSocket updates.' : 'broadcasts disabled.') : 'DIAGNOSTIC ONLY: no database storage or broadcasts.').' ACK allowlist: '.($this->option('registered') ? 'all active SQL registrations (checked for every packet)' : ($imei ?: 'none; observation only')));
         $this->info('Live connections, bytes, login, heartbeat and location status appear below. Ctrl+C stops.');
         $clients = [];
         $totals = ['connections' => 0, 'reads' => 0, 'bytes' => 0, 'logins' => 0, 'heartbeats' => 0, 'locations' => 0, 'valid_fixes' => 0,
@@ -70,7 +72,7 @@ class DiagnoseGps extends Command
         foreach ($imeis as $allowedImei) {
             $deviceStates[$allowedImei] = new GpsDiagnosticState;
         }
-        $close = function (int $id, string $reason) use (&$clients): void {
+        $close = function (int $id, string $reason) use (&$clients, $profile): void {
             if (! isset($clients[$id])) {
                 return;
             }
@@ -78,7 +80,21 @@ class DiagnoseGps extends Command
                 'received_bytes' => $clients[$id]['bytes'], 'packets' => $clients[$id]['packets']]);
             if ($this->option('persist')) {
                 try {
-                    DB::table('gps_connection_sessions')->where('id', $clients[$id]['session_id'])->update(['disconnected_at' => now()->utc()]);
+                    $presenceDeviceId = $clients[$id]['imei'] ? DB::table('gps_devices')->where('identifier', $clients[$id]['imei'])->value('id') : null;
+                    if ($presenceDeviceId) app(\App\Services\Gps\HardwareConnectionState::class)->close($presenceDeviceId, $clients[$id]['session_id']);
+                    if (config('gps.live_first')) {
+                        $deviceId = $clients[$id]['imei'] ? DB::table('gps_devices')->where('identifier', $clients[$id]['imei'])->value('id') : null;
+                        if ($deviceId) {
+                            Queue::connection(config('gps.live_connection'))->push(new CloseHardwareSession([
+                                'id' => $clients[$id]['session_id'], 'gps_device_id' => $deviceId, 'protocol' => $profile,
+                                'remote_ip' => $clients[$id]['peer'], 'connected_at' => $clients[$id]['connected_at'],
+                                'last_packet_at' => now()->utc()->format('Y-m-d H:i:s'),
+                                'disconnected_at' => now()->utc()->format('Y-m-d H:i:s'), 'authenticated' => true,
+                            ]), '', config('gps.persistence_queue'));
+                        }
+                    } else {
+                        DB::table('gps_connection_sessions')->where('id', $clients[$id]['session_id'])->update(['disconnected_at' => now()->utc()]);
+                    }
                 } catch (Throwable) {
                     $this->record('STORAGE_ERROR', ['reason' => 'session_close_failed']);
                 }
@@ -204,7 +220,7 @@ class DiagnoseGps extends Command
                             if ($this->option('persist')) {
                                 app(LocalHardwareRecorder::class)->record($packet, $frame, $clients[$id]['imei'], $profile,
                                     $clients[$id]['session_id'], $clients[$id]['connected_at'], $clients[$id]['peer']);
-                                $this->record('DATABASE_SAVED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type]);
+                                $this->record(config('gps.live_first') ? 'PACKET_QUEUED' : 'DATABASE_SAVED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type]);
                             }
                             $deviceState = $deviceStates[$clients[$id]['imei']];
                             $deviceState->observe($packet, $clients[$id]['imei'], $lastData);
@@ -245,7 +261,12 @@ class DiagnoseGps extends Command
                         $close($id, $e instanceof InvalidArgumentException ? $e->getMessage() : 'socket_error');
                     }
                 }
-                foreach ($write as $socket) {
+                // Include ACKs queued by this read pass immediately. These
+                // sockets are nonblocking; partial writes stay queued for the
+                // next select pass instead of adding a one-second idle wait.
+                foreach ($clients as $client) {
+                    if ($client['out'] === '') continue;
+                    $socket = $client['socket'];
                     $id = (int) $socket;
                     if (! isset($clients[$id])) {
                         continue;

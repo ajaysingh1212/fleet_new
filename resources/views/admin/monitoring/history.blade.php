@@ -1,41 +1,32 @@
 @extends('layouts.app')
-
-@section('page-eyebrow', 'Phase 4')
-@section('page-title', 'GPS History & Timeline')
-
+@section('page-eyebrow', 'Fleet intelligence')
+@section('page-title', 'GPS History')
 @section('content')
-    <div class="card tracker-surface-card mb-4">
-        <div class="card-body">
-            <div class="row g-2">
-                <div class="col-md-3"><input class="form-control" id="history-user" placeholder="User ID"></div>
-                <div class="col-md-3">
-                    <select class="form-select" id="history-preset">
-                        <option value="today">Today</option>
-                        <option value="yesterday">Yesterday</option>
-                        <option value="last_7_days">Last 7 Days</option>
-                        <option value="last_30_days">Last 30 Days</option>
-                    </select>
-                </div>
-                <div class="col-md-2"><button class="btn tracker-primary-btn w-100" id="history-load">Load</button></div>
-            </div>
+<div id="hardware-history" class="journey" data-targets-url="{{ route('admin.monitoring.history.targets') }}" data-report-url="{{ route('admin.monitoring.history.data') }}">
+    <div class="journey-intro"><div><span class="journey-kicker">THE JOURNEY, IN DETAIL</span><h2>Every turn. Every moment.</h2><p>Explore your vehicle’s journey with precise GPS history and route playback.</p></div><span class="journey-timezone"><i class="fa-regular fa-clock" aria-hidden="true"></i> Indian Standard Time · UTC +05:30</span></div>
+    <form id="gps-history-form" class="journey-filter">
+        <div class="journey-filter-heading"><span class="journey-icon"><i class="fa-solid fa-sliders" aria-hidden="true"></i></span><div><h3>Build your journey report</h3><p>Choose a vehicle, a time window, and the details you need.</p></div></div>
+        <div class="journey-filter-grid">
+            <div class="journey-filter-column"><label for="history-kind" class="journey-label"><b>01</b> Vehicle or tracker</label><div class="journey-search"><select id="history-kind" class="form-select"><option value="vehicle">Vehicle</option><option value="device">IMEI / GPS device</option></select><label for="history-search" class="visually-hidden">Search vehicles or trackers</label><input id="history-search" class="form-control" placeholder="Search registration or vehicle name" maxlength="100" autocomplete="off"></div><label for="history-target" class="visually-hidden">Matching vehicles or trackers</label><select id="history-target" class="form-select journey-targets" size="3" required aria-describedby="history-search-status"></select><div id="history-search-status" class="journey-help" role="status">Loading vehicles...</div></div>
+            <fieldset id="history-period" class="journey-filter-column" disabled><legend class="journey-label"><b>02</b> Time window</legend><label for="history-preset" class="visually-hidden">Date filter</label><select id="history-preset" class="form-select"><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="custom">Custom date</option></select><div id="history-custom" hidden class="mt-3"><label for="history-from" class="form-label small">From (IST)</label><input type="datetime-local" id="history-from" class="form-control mb-2"><label for="history-to" class="form-label small">To (IST)</label><input type="datetime-local" id="history-to" class="form-control"></div><p class="journey-help mt-3"><i class="fa-regular fa-calendar" aria-hidden="true"></i> Review a day or explore a custom period.</p></fieldset>
+            <fieldset id="history-report-choice" class="journey-filter-column" disabled><legend class="journey-label"><b>03</b> Report type</legend><div class="journey-report-options">@foreach(['route' => 'Route History', 'geofence' => 'Geofence Report', 'all' => 'All Reports'] as $value => $label)<label class="journey-report-option"><input id="history-{{ $value }}-choice" type="radio" name="history-report" value="{{ $value }}" @checked($value === 'route')><span>{{ $label }}</span></label>@endforeach</div><button id="history-load" class="btn journey-primary w-100 mt-3" type="submit"><i class="fa-solid fa-route" aria-hidden="true"></i> Explore history <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></fieldset>
         </div>
+    </form>
+    <div id="history-message" class="journey-message" role="status" aria-live="polite">Select a vehicle or IMEI to get started.</div>
+    <div id="history-results" hidden>
+        <div class="journey-result-heading"><div><span class="journey-kicker">JOURNEY REPORT</span><h2 id="history-result-title"></h2><p id="history-result-range"></p></div><button id="history-download" type="button" class="btn journey-export"><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> Download PDF</button></div>
+        <div id="history-export-status" class="journey-help mb-3" role="status"></div>
+        <section id="history-route-section" hidden>
+            <div id="history-route-summary" class="journey-stats"></div>
+            <div class="journey-card journey-route-card"><div class="journey-section-heading"><div><span class="journey-kicker">ROUTE EXPLORER</span><h3>Your journey, in motion</h3></div><div class="journey-legend"><span><i style="background:#10b981"></i> 0–40</span><span><i style="background:#3b82f6"></i> 41–80</span><span><i style="background:#f59e0b"></i> &gt;80 km/h</span></div></div>
+                <div id="history-map-warning" class="alert alert-warning m-3" hidden></div>
+                <div class="journey-map-grid"><div id="history-route-map" aria-label="Historical vehicle route"></div><aside class="journey-telemetry"><span class="journey-kicker">RECORDED SPEED</span><div class="journey-gauge"><svg viewBox="0 0 240 150" role="img" aria-label="Recorded speedometer"><path d="M 30 120 A 90 90 0 0 1 210 120" class="gauge-track"/><path id="history-gauge-arc" d="M 30 120 A 90 90 0 0 1 210 120" class="gauge-progress" pathLength="100"/><g id="history-gauge-needle"><path d="M120 120 L47 120"/><circle cx="120" cy="120" r="6"/></g><text x="26" y="144">0</text><text x="110" y="25" id="history-gauge-mid">80</text><text x="196" y="144" id="history-gauge-max">160</text></svg><div class="journey-speed"><strong id="history-current-speed">—</strong><span>km/h</span></div></div><span id="history-motion" class="journey-badge">Ready to explore</span><dl class="journey-point-details"><div><dt>GPS time · IST</dt><dd id="history-current-time">—</dd></div><div><dt>Coordinates</dt><dd id="history-current-location">—</dd></div><div><dt>GPS sample</dt><dd id="history-current-point">—</dd></div></dl><p class="journey-help">Speed is measured at the selected GPS point. Select the route or chart to inspect a moment.</p></aside></div>
+                <div class="journey-playback"><button id="history-play" type="button" class="btn journey-primary" disabled aria-label="Play route"><i class="fa-solid fa-play" aria-hidden="true"></i> Play</button><button id="history-restart" type="button" class="btn journey-export" disabled aria-label="Restart route"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></button><div class="journey-scrubber"><label for="history-progress" class="visually-hidden">Route position</label><input id="history-progress" type="range" min="0" max="0" value="0" disabled><div><span id="history-playback-time">No route loaded</span><span id="history-playback-state" role="status">Ready</span></div></div><label for="history-playback-speed" class="journey-rate">Playback<select id="history-playback-speed" class="form-select"><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="16">16x</option></select></label></div>
+                <div class="journey-speed-chart"><div class="d-flex justify-content-between"><h4>Speed profile</h4><span class="journey-help">Select any point to inspect</span></div><div id="history-speed-chart" aria-label="Recorded speed over the journey"></div></div>
+            </div>
+            <div class="journey-card mt-4"><div class="journey-section-heading"><div><span class="journey-kicker">THE DETAILS</span><h3>GPS activity log</h3><p>Select a record to locate it on the map.</p></div><span class="journey-badge">Measured GPS data</span></div><div class="table-responsive"><table class="table journey-table align-middle"><thead><tr><th>GPS time (IST)</th><th>Latitude</th><th>Longitude</th><th>Speed (km/h)</th><th>Ignition</th></tr></thead><tbody id="history-route-rows"></tbody></table></div><div id="history-route-pages" class="journey-pagination"></div></div>
+        </section>
+        <section id="history-geofence-section" class="journey-card mt-4" hidden><div class="journey-section-heading"><div><span class="journey-kicker">BOUNDARIES & ALERTS</span><h3>Geofence Report</h3><p>Alerts overlapping the selected period, including alerts that began earlier.</p></div></div><div class="table-responsive"><table class="table journey-table align-middle"><thead><tr><th>Geofence</th><th>Alert</th><th>Started (IST)</th><th>Ended (IST)</th><th>Speed / limit (km/h)</th></tr></thead><tbody id="history-geofence-rows"></tbody></table></div><div id="history-geofence-pages" class="journey-pagination"></div></section>
     </div>
-    <div class="row g-4">
-        <div class="col-lg-7"><div class="card tracker-surface-card"><div class="card-body"><pre class="mb-0" id="history-output">Select filters and load history.</pre></div></div></div>
-        <div class="col-lg-5"><div class="card tracker-surface-card"><div class="card-body"><div id="timeline-output">Timeline events will appear here.</div></div></div></div>
-    </div>
-    <script>
-        document.getElementById('history-load').addEventListener('click', async () => {
-            const params = {preset: document.getElementById('history-preset').value};
-            if (document.getElementById('history-user').value) params.user_id = document.getElementById('history-user').value;
-            const [history, timeline] = await Promise.all([
-                axios.get('/api/v1/history', {params}),
-                axios.get('/api/v1/timeline', {params}),
-            ]);
-            document.getElementById('history-output').textContent = JSON.stringify(history.data.data.slice(0, 20), null, 2);
-            document.getElementById('timeline-output').innerHTML = timeline.data.data.slice(0, 50).map(event => `
-                <div class="border-bottom py-2"><strong>${event.title}</strong><div class="text-muted small">${event.occurred_at}</div></div>
-            `).join('') || 'No events.';
-        });
-    </script>
+</div>
 @endsection

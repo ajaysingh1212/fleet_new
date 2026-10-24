@@ -4,6 +4,7 @@ namespace App\Events;
 
 use App\Models\GpsDevice;
 use App\Models\GpsDeviceLocation;
+use App\Services\Gps\HardwareFleet;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -16,12 +17,12 @@ class HardwareLocationUpdated implements ShouldBroadcast
 
     public function __construct(public array $location)
     {
-        $this->connection = config('gps.queue_connection');
+        $this->connection = config('gps.broadcast_connection');
     }
 
     public function broadcastOn(): array
     {
-        return [new PrivateChannel('admin.gps.hardware')];
+        return [new PrivateChannel('admin.gps.hardware.device.'.(int) $this->location['device_id'])];
     }
 
     public function broadcastAs(): string
@@ -31,12 +32,16 @@ class HardwareLocationUpdated implements ShouldBroadcast
 
     public function broadcastWith(): array
     {
-        return $this->location;
+        // Read the current state when the worker sends it. Queued/retried old
+        // location events must not roll back a newer heartbeat or assignment.
+        $device = GpsDevice::with(['vehicle', 'latestLocation', 'latestHeartbeat'])->find($this->location['device_id']);
+
+        return $device ? app(HardwareFleet::class)->device($device) : $this->location;
     }
 
     public function broadcastQueue(): string
     {
-        return config('gps.queue');
+        return config('gps.broadcast_queue');
     }
 
     public static function payload(GpsDevice $device, GpsDeviceLocation $location): array

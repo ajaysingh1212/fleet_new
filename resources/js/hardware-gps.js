@@ -1,11 +1,13 @@
 ﻿import L from 'leaflet';
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
-import {fleetState, fleetPresentation} from './hardware-gps-motion.js';
+import {fleetState, fleetPresentation, mergeFleetUpdate} from './hardware-gps-motion.js';
 import {HardwareMarkerMotion} from './hardware-marker-motion.js';
+import {HardwareFleetStream} from './hardware-fleet-stream.js';
+import {initFleetConsole} from './fleet-console.js';
+import {warningLabel} from './fleet-geofence-alerts.js';
 
 const colors = {moving: '#16803c', idle: '#c77c00', parked: '#2563eb', stopped: '#2563eb', offline: '#64748b', stale_gps: '#a16207', awaiting_gps: '#a16207', no_gps_fix: '#a16207'};
-const label = value => String(value ?? 'Unknown').replaceAll('_', ' ');
 const car = '<path d="M5 15l2-6h10l2 6M4 15h16v6H4zM7 21v3m10-3v3M8 12h8"/>';
 const bike = '<circle cx="6" cy="20" r="4"/><circle cx="22" cy="20" r="4"/><path d="M6 20l6-10 5 10H6m11 0l3-13h-4m-8 3h6m6-3h3"/>';
 const point = p => Number.isFinite(p.latitude) && Number.isFinite(p.longitude) && Math.abs(p.latitude) <= 90 && Math.abs(p.longitude) <= 180;
@@ -16,27 +18,42 @@ export function initHardwareGps() {
     if (!container) return;
     const map = L.map(container).setView([20.59, 78.96], 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '&copy; OpenStreetMap contributors', maxZoom: 19}).addTo(map);
-    const vehicles = new Map(), markers = new Map(), animations = new Map(), appearances = new Map();
+    const vehicles = new Map(), markers = new Map(), animations = new Map(), appearances = new Map(), rosterRows = new Map();
     const roster = document.getElementById('hardware-fleet-list');
     const status = document.getElementById('hardware-live-status');
-    let stopped = false, fitted = false, polling = false;
-    const icon = p => L.divIcon({className: 'fleet-marker', iconSize: [38, 38], iconAnchor: [19, 19],
-        html: `<div style="background:${colors[fleetState(p)] ?? '#64748b'};border:3px solid white;border-radius:50%;width:38px;height:38px;box-shadow:0 2px 7px #0006;display:grid;place-items:center"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${['bike', 'motorcycle', 'motorbike'].includes(p.vehicle_type) ? bike : car}</svg></div>`});
+    let stopped = false, fitted = false, renderFrame = null, consoleUi = null;
+    let meta = JSON.parse(container.dataset.meta);
+    const cursors = [0];
+    let liveState = 'connecting', navigation = null;
+    const pending = new Map();
+    const describeStream = () => {
+        const messages = {connecting: 'Connecting to live updates', live: 'WebSocket connected', disconnected: 'WebSocket disconnected - reconnecting; last received data shown', unauthorized: 'Live subscription denied - sign in again', unavailable: 'WebSocket unavailable', syncing: 'Synchronizing fleet', error: 'Synchronization failed - use Sync now', empty: 'No matching trackers'};
+        status.textContent = `${messages[liveState] ?? liveState} | ${vehicles.size} loaded (maximum ${meta.limit}) | Updates arrive when devices report`;
+        document.getElementById('hardware-page-next').disabled = !meta.has_more || liveState === 'syncing';
+        document.getElementById('hardware-page-prev').disabled = cursors.length < 2 || liveState === 'syncing';
+    };
+    const icon = p => L.divIcon({className: `fleet-marker${consoleUi?.hasAlerts(p.device_id) ? (consoleUi.getAlerts(p.device_id).every(a=>a.historical) ? ' has-violation violation-historical' : ' has-violation') : ''}`, iconSize: [38, 38], iconAnchor: [19, 19],
+        html: `<div class="fleet-marker-body" style="background:${colors[fleetState(p)] ?? '#64748b'};border:3px solid white;border-radius:50%;width:38px;height:38px;box-shadow:0 2px 7px #0006;display:grid;place-items:center"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${['bike', 'motorcycle', 'motorbike'].includes(p.vehicle_type) ? bike : car}</svg></div>`});
     const popup = p => {
         const node = document.createElement('div');
         const display = fleetPresentation(p);
-        for (const text of [p.registration ?? p.name, `Driver: ${p.driver_name ?? 'Not assigned'}`,
+        for (const text of [p.registration ?? p.name,
+            ...(consoleUi?.getAlerts(p.device_id) ?? []).map(a => `${a.historical ? 'GPS WARNING' : 'ALERT'}: ${a.label ?? warningLabel(a.type)} - ${a.geofence_name} - ${a.detail ?? 'Violation recorded'}`), `Driver: ${p.driver_name ?? 'Not assigned'}`,
             `Connection: ${display.connection}`, `Movement: ${display.movement}`, `GPS: ${display.gps}`,
             `Last GPS speed: ${p.speed ?? 'Unknown'} km/h`, `ACC: ${display.acc}`,
             ...(p.acc_reported_at ? [`ACC report time: ${new Date(p.acc_reported_at).toLocaleString()}`] : []),
-            `GPS time: ${p.recorded_at ? new Date(p.recorded_at).toLocaleString() : 'Not received'}`, `Coordinates: ${p.latitude}, ${p.longitude}`]) {
+            `GPS time: ${p.recorded_at ? new Date(p.recorded_at).toLocaleString() : 'Not received'}`,
+            ...(p.received_at ? [`Location received by server: ${new Date(p.received_at).toLocaleString()}`,
+                `GPS age on arrival: ${Math.max(0, Math.round((Date.parse(p.received_at) - Date.parse(p.recorded_at))/1000))}s`] : []),
+            `Coordinates: ${p.latitude}, ${p.longitude}`]) {
             const line = document.createElement('div'); line.textContent = text; node.append(line);
         }
+        if(p.device_id){const manage=document.createElement('a');manage.href=`/admin/gps-devices/${Number(p.device_id)}/edit`;manage.textContent='Manage tracker / assign vehicle';node.append(manage);}
         return node;
     };
     const renderRoster = () => {
         const devices = [...vehicles.values()].filter(p => p.device_id != null);
-        const counts = {registered: devices.length, online: 0, offline: 0, inactive: 0, moving: 0, stopped: 0};
+        const counts = {online: 0, offline: 0, inactive: 0, moving: 0, stopped: 0, parked: 0};
         for (const p of devices) {
             const state = fleetState(p);
             if (p.authorization !== 'active') counts.inactive++;
@@ -44,20 +61,29 @@ export function initHardwareGps() {
             else counts.online++;
             if (state === 'moving') counts.moving++;
             if (['idle', 'parked', 'stopped'].includes(state)) counts.stopped++;
+            if (state === 'parked') counts.parked++;
         }
+        consoleUi?.refresh();
         document.querySelectorAll('[data-fleet-stat]').forEach(node => {
             if (counts[node.dataset.fleetStat] !== undefined) node.textContent = counts[node.dataset.fleetStat];
         });
-        roster.replaceChildren();
-        for (const [id, p] of vehicles) {
-            const display = fleetPresentation(p);
-            const button = document.createElement('button');
+    };
+    const renderRow = (id, p) => {
+        const display = fleetPresentation(p);
+        let button = rosterRows.get(id);
+        if (!button) {
+            button = document.createElement('button');
             button.type = 'button'; button.className = 'list-group-item list-group-item-action';
-            button.textContent = `${p.registration ?? p.name} · ${display.connection} · ${display.movement} · GPS: ${display.gps} · ${p.driver_name ?? 'No driver'}`;
-            button.style.borderLeft = `5px solid ${colors[fleetState(p)] ?? '#64748b'}`;
+            button.innerHTML = '<span class="fleet-device-title"></span><span class="fleet-device-meta"></span><span class="fleet-device-state"></span><span class="fleet-device-alert"></span>';
             button.addEventListener('click', () => { const marker = markers.get(id); if (marker) { map.setView(marker.getLatLng(), 16); marker.openPopup(); } });
-            roster.append(button);
+            rosterRows.set(id, button); roster.append(button);
         }
+        const fields = {'.fleet-device-title':p.registration ?? p.name, '.fleet-device-meta':`${p.imei ?? 'Unassigned tracker'} ? ${p.driver_name ?? 'No driver'}`,
+            '.fleet-device-state':`${display.connection} ? ${display.movement} ? ${p.speed ?? '?'} km/h`,
+            '.fleet-device-alert':(consoleUi?.getAlerts(p.device_id) ?? []).map(a=>`${a.label ?? warningLabel(a.type)}: ${a.geofence_name}${a.historical ? ' - Last known location, GPS pending' : ''}`).join(' | ')};
+        for(const [selector,value] of Object.entries(fields)){const node=button.querySelector(selector);if(node.textContent!==value)node.textContent=value;}
+        button.title=`GPS: ${display.gps}`;
+        button.style.borderLeft = `4px solid ${consoleUi?.hasAlerts(p.device_id) ? '#ef4444' : colors[fleetState(p)] ?? '#64748b'}`;
     };
     const fit = () => {
         const points = [...vehicles.values()].filter(point).map(p => [p.latitude, p.longitude]);
@@ -65,14 +91,9 @@ export function initHardwareGps() {
     };
     const update = incoming => {
         const id = key(incoming), old = vehicles.get(id);
-        const p = {...old, ...incoming};
-        if (old?.recorded_at && incoming.recorded_at && old.vehicle_id === incoming.vehicle_id && Date.parse(incoming.recorded_at) < Date.parse(old.recorded_at)) {
-            for (const field of ['latitude', 'longitude', 'recorded_at', 'speed', 'heading', 'acc']) p[field] = old[field];
-        }
-        if (old?.vehicle_id === incoming.vehicle_id && Date.parse(old?.acc_reported_at) > Date.parse(incoming.acc_reported_at)) {
-            for (const field of ['acc', 'acc_reported', 'acc_reported_at', 'acc_source']) p[field] = old[field];
-        }
+        const p = mergeFleetUpdate(old, incoming);
         vehicles.set(id, p);
+        consoleUi?.observe(p);
         if (old && old.vehicle_id !== p.vehicle_id) {
             animations.get(id)?.stop(); animations.delete(id); appearances.delete(id);
             markers.get(id)?.remove(); markers.delete(id);
@@ -80,11 +101,12 @@ export function initHardwareGps() {
         if (point(p)) {
             let marker = markers.get(id);
             const newer = !old || Date.parse(p.recorded_at) > Date.parse(old.recorded_at);
-            const appearance = `${fleetState(p)}:${p.vehicle_type}`;
+            const appearance = `${fleetState(p)}:${p.vehicle_type}:${(consoleUi?.getAlerts(p.device_id)??[]).map(a=>`${a.rule_id}:${a.type}:${a.historical}`).join(',')}`;
             if (!marker) {
                 marker = L.marker([p.latitude, p.longitude], {icon: icon(p)}).addTo(map);
                 // Updating an open popup must not pan the map on every GPS packet.
                 marker.bindPopup(popup(p), {autoPan: false});
+                marker.on('popupopen',()=>marker.setPopupContent(popup(vehicles.get(id))));
                 const title = document.createElement('span'); title.textContent = p.registration ?? p.name;
                 marker.bindTooltip(title, {direction: 'top'}); markers.set(id, marker);
                 appearances.set(id, appearance);
@@ -106,6 +128,7 @@ export function initHardwareGps() {
             animations.get(id)?.stop(); animations.delete(id); appearances.delete(id);
             markers.get(id)?.remove(); markers.delete(id);
         }
+        renderRow(id, p);
         const row = document.querySelector(`[data-hardware-device="${Number(p.device_id)}"]`);
         if (row) {
             row.querySelector('[data-speed]').textContent = p.speed ?? 'Unknown';
@@ -115,30 +138,59 @@ export function initHardwareGps() {
             row.querySelector('[data-connection]').textContent = `${display.connection} · ${display.movement}`;
         }
     };
-    JSON.parse(container.dataset.positions).forEach(update); renderRoster(); fit();
-    document.getElementById('hardware-fit-fleet').addEventListener('click', fit);
-    const poll = async () => {
-        if (stopped || polling) return;
-        polling = true;
-        try {
-            const {data} = await axios.get(container.dataset.fleetUrl, {timeout: 5000});
-            if (stopped) return;
-            const current = new Set(data.devices.map(key));
-            for (const id of vehicles.keys()) if (!current.has(id)) {
-                animations.get(id)?.stop(); animations.delete(id); appearances.delete(id);
-                markers.get(id)?.remove(); markers.delete(id); vehicles.delete(id);
-            }
-            data.devices.forEach(update); renderRoster(); if (!fitted) fit();
-            status.textContent = `Fleet updated ${new Date().toLocaleTimeString()} · ${vehicles.size} registered trackers / vehicles · live updates every second`;
-        } catch { status.textContent = 'Live refresh unavailable; showing last received positions. Retrying…'; }
-        finally { polling = false; }
+    const remove = id => {
+        animations.get(id)?.stop(); animations.delete(id); appearances.delete(id);
+        markers.get(id)?.remove(); markers.delete(id); vehicles.delete(id);
+        rosterRows.get(id)?.remove(); rosterRows.delete(id); pending.delete(id);
     };
-    if (window.Echo) window.Echo.private('admin.gps.hardware').listen('.hardware.location.updated', p => {
-        if (!stopped) { update(p); renderRoster(); if (!fitted) fit(); }
+    const flush = () => {
+        renderFrame = null;
+        if (stopped) return;
+        for (const p of pending.values()) update(p);
+        pending.clear(); renderRoster(); if (!fitted) fit(); describeStream();
+    };
+    const queueUpdate = p => {
+        const id = key(p), previous = pending.get(id);
+        if (!previous?.observed_at || !p.observed_at || p.observed_at >= previous.observed_at) pending.set(id, p);
+        if (renderFrame === null) renderFrame = requestAnimationFrame(flush);
+    };
+    const initial = JSON.parse(container.dataset.positions);
+    initial.forEach(update); renderRoster(); fit();
+    const filters = JSON.parse(container.dataset.filters);
+    const stream = new HardwareFleetStream({
+        echo: window.Echo,
+        fetchSnapshot: async (after, signal) => (await axios.get(container.dataset.fleetUrl, {params: {...filters, after}, signal, timeout: 10000})).data,
+        onSnapshot: data => {
+            const current = new Set(data.devices.map(key));
+            for (const id of vehicles.keys()) if (!current.has(id)) remove(id);
+            if (navigation === 'next') cursors.push(data.meta.after);
+            if (navigation === 'previous') cursors.pop();
+            navigation = null;
+            data.devices.forEach(update); meta = data.meta; renderRoster(); if (!fitted) fit(); consoleUi?.loadActive(); consoleUi?.loadZones();
+        },
+        onUpdate: queueUpdate,
+        onStatus: state => { if (state === 'error') navigation = null; liveState = state; describeStream(); },
     });
-    const timer = window.setInterval(poll, 1000); poll();
+    consoleUi = initFleetConsole({map, vehicles,
+        redraw: deviceId => {const p=vehicles.get(`device:${deviceId}`);if(p)queueUpdate(p);},
+        onSearch: values => {Object.assign(filters,values);navigation=null;cursors.splice(0,cursors.length,0);fitted=false;stream.load(0);}});
+    stream.watch(initial); describeStream();
+    document.getElementById('hardware-fit-fleet').addEventListener('click', fit);
+    document.getElementById('hardware-sync').addEventListener('click', () => stream.load());
+    document.getElementById('hardware-page-next').addEventListener('click', () => {
+        if (meta.next_after != null) { navigation = 'next'; stream.load(meta.next_after); }
+    });
+    document.getElementById('hardware-page-prev').addEventListener('click', () => {
+        if (cursors.length > 1) { navigation = 'previous'; stream.load(cursors.at(-2)); }
+    });
+    // Local clock only: expire offline/ignition labels even when no packet is
+    // arriving. This does not make HTTP requests or rebuild the map/list.
+    const timer = window.setInterval(() => {
+        for (const p of vehicles.values()) queueUpdate(p);
+    }, 1000);
     window.addEventListener('pagehide', () => {
-        stopped = true; clearInterval(timer); animations.forEach(motion => motion.stop());
-        window.Echo?.leave('admin.gps.hardware'); map.remove();
+        stopped = true; clearInterval(timer); stream.dispose(); consoleUi?.dispose();
+        if (renderFrame !== null) cancelAnimationFrame(renderFrame);
+        animations.forEach(motion => motion.stop()); map.remove();
     }, {once: true});
 }

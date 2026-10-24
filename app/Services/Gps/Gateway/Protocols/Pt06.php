@@ -69,7 +69,7 @@ final class Pt06 implements Protocol
 
         return match ($type) {
             0x13 => $this->heartbeat($payload, $serial),
-            0x22 => $this->position($payload),
+            0x22 => $this->position($payload, $serial),
             0x26 => $this->alarm($payload, $serial),
             0x24 => $this->lbs($payload),
             0x94 => $this->information($frame, $payload),
@@ -136,7 +136,7 @@ final class Pt06 implements Protocol
         return new Packet('heartbeat', null, self::VERSION, $this->ack(0x13, $serial), events: $events);
     }
 
-    private function position(string $payload): Packet
+    private function position(string $payload, string $serial): Packet
     {
         // Section 5.2: 29 bytes without mileage, 33 with a uint32 metre counter.
         if (! in_array(strlen($payload), [29, 33], true)) {
@@ -155,7 +155,11 @@ final class Pt06 implements Protocol
             'odometer_m' => strlen($payload) === 33 ? $r->number(4) : null];
         $location = $this->location($gps, $telemetry);
 
-        return new Packet('location', null, self::VERSION, '', [$location]);
+        // GT06-compatible firmware can wait for a serial-matched location ACK
+        // before draining its stored fixes. The receiver sends this only after
+        // the authenticated packet has been durably accepted, like login/heartbeat.
+        return new Packet('location', null, self::VERSION,
+            config('gps.pt06_location_ack', true) ? $this->ack(0x22, $serial) : '', [$location]);
     }
 
     private function alarm(string $payload, string $serial): Packet

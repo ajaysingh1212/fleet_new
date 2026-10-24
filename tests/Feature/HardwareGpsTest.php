@@ -110,6 +110,7 @@ class HardwareGpsTest extends TestCase
 
     public function test_local_recording_requires_active_registration_and_map_distinguishes_idle_parked_and_stale(): void
     {
+        config(['gps.local_broadcast' => false]);
         $this->seed(HardwareFleetSeeder::class);
         $device = GpsDevice::where('identifier', '864540081540460')->firstOrFail();
         $recorder = app(LocalHardwareRecorder::class);
@@ -130,7 +131,8 @@ class HardwareGpsTest extends TestCase
         $this->assertSame('parked', $fleet->device($device->fresh())['state']);
         $this->travel(190)->seconds();
         $recorder->record($heartbeat, 'heartbeat-stale-fix', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
-        $this->assertSame('stale_gps', $fleet->device($device->fresh())['state']);
+        $this->assertSame('parked', $fleet->device($device->fresh())['state']);
+        $this->assertSame('stale_gps', $fleet->device($device->fresh())['gps_state']);
         Event::assertNotDispatched(HardwareLocationUpdated::class);
         $device->update(['status' => 'blocked']);
         $this->assertFalse($recorder->allows($device->identifier, 'pt06', Pt06::VERSION));
@@ -154,7 +156,7 @@ class HardwareGpsTest extends TestCase
             events: ['acc' => false, 'gps_positioned_reported' => true]),
             'newer-off', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
         $data = $fleet->device($device->fresh());
-        $this->assertSame('moving', $data['state']);
+        $this->assertSame('parked', $data['state']);
         $this->assertFalse($data['acc']);
         $this->assertSame('heartbeat', $data['acc_source']);
         $this->travel(181)->seconds();
@@ -181,8 +183,9 @@ class HardwareGpsTest extends TestCase
         $gateway = app(Gateway::class);
         $this->assertSame(hex2bin('787805010001D9DC0D0A'), $gateway->feed($c, $fixture('bt50-user-login')));
         $this->assertSame('pt06', $c->protocol->name());
-        $this->assertSame($fixture('pt06/pdf-alarm-ack'), $gateway->feed($c, $fixture('pt06/pdf-location').$fixture('pt06/pdf-alarm')));
-        $this->assertSame('', $gateway->feed($c, $fixture('pt06/pdf-location')));
+        $locationAck = hex2bin('787805220010348B0D0A');
+        $this->assertSame($locationAck.$fixture('pt06/pdf-alarm-ack'), $gateway->feed($c, $fixture('pt06/pdf-location').$fixture('pt06/pdf-alarm')));
+        $this->assertSame($locationAck, $gateway->feed($c, $fixture('pt06/pdf-location')));
         $this->assertDatabaseCount('gps_device_locations', 2);
         $this->assertDatabaseHas('gps_device_locations', ['protocol' => 'pt06', 'speed' => 17]);
         $this->assertDatabaseHas('gps_device_events', ['type' => 'alarm']);
@@ -402,13 +405,84 @@ class HardwareGpsTest extends TestCase
         Event::assertDispatched(HardwareLocationUpdated::class);
         $device = GpsDevice::first();
         $event = new HardwareLocationUpdated(HardwareLocationUpdated::payload($device, $device->latestLocation));
-        $this->assertSame('private-admin.gps.hardware', $event->broadcastOn()[0]->name);
+        $this->assertSame('private-admin.gps.hardware.device.'.$device->id, $event->broadcastOn()[0]->name);
         $this->assertArrayNotHasKey('configuration', $event->broadcastWith());
         $this->assertArrayNotHasKey('identifier', $event->broadcastWith());
         $this->assertArrayNotHasKey('telemetry', $event->broadcastWith());
         $this->assertTrue($admin->can('viewAny', GpsDevice::class));
         $plain = $this->actingAsPlainUser();
         $this->assertFalse($plain->can('viewAny', GpsDevice::class));
+    }
+
+    public function test_local_heartbeat_publishes_parking_without_a_fresh_fix_and_expires_ignition(): void
+    {
+        config(['gps.local_broadcast' => true]);
+        $device = $this->device();
+        $c = new Connection('127.0.0.1');
+        app(LocalHardwareRecorder::class)->record(new Packet('heartbeat', null, '8',
+            events: ['acc' => false, 'gps_positioned_reported' => false]),
+            'simulated-parked-heartbeat', $device->identifier, 'teltonika', $c->id, $c->connectedAt, $c->peer);
+        Event::assertDispatched(HardwareLocationUpdated::class, fn ($event) => $event->location['device_id'] === $device->id);
+        $event = new HardwareLocationUpdated(['device_id' => $device->id]);
+        $payload = $event->broadcastWith();
+        $this->assertSame('parked', $payload['state']);
+        $this->assertSame('awaiting_gps', $payload['gps_state']);
+        $this->assertNull($payload['latitude']);
+        $this->assertFalse($payload['acc']);
+        $this->assertSame(config('gps.broadcast_queue'), $event->broadcastQueue());
+        $older = now()->subMinute()->utc()->format('Y-m-d H:i:s');
+        (new ProcessHardwarePacket($device->id, $device->identifier, $c->id, $c->connectedAt, $c->peer,
+            'teltonika', '8', 'heartbeat', hash('sha256', 'delayed-ignition-on'), [], ['acc' => true], $older, null, false))->handle();
+        $this->assertFalse($event->broadcastWith()['acc']);
+        $this->assertSame('parked', $event->broadcastWith()['state']);
+        $this->travel(181)->seconds();
+        $this->assertSame('offline', $event->broadcastWith()['state']);
+        $this->assertNull($event->broadcastWith()['acc']);
+    }
+
+    public function test_fleet_snapshots_are_bounded_filterable_and_use_a_device_cursor(): void
+    {
+        $this->actingAsSuperAdmin();
+        config(['gps.map_limit' => 2]);
+        for ($i = 0; $i < 5; $i++) {
+            GpsDevice::create(['name' => 'Page '.$i, 'identifier' => '10000000000000'.$i,
+                'protocol' => $i < 3 ? 'pt06' : 'teltonika', 'status' => 'inactive']);
+        }
+        $first = $this->getJson(route('admin.gps-devices.fleet'))->assertOk()->assertJsonCount(2, 'devices')
+            ->assertJsonPath('meta.has_more', true)->json();
+        $second = $this->getJson(route('admin.gps-devices.fleet', ['after' => $first['meta']['next_after']]))
+            ->assertOk()->assertJsonCount(2, 'devices')->json();
+        $this->assertEmpty(array_intersect(array_column($first['devices'], 'device_id'), array_column($second['devices'], 'device_id')));
+        $this->getJson(route('admin.gps-devices.fleet', ['protocol' => 'teltonika']))
+            ->assertOk()->assertJsonCount(2, 'devices')->assertJsonPath('meta.has_more', false);
+        $this->getJson(route('admin.gps-devices.fleet', ['search' => 'Page 4']))
+            ->assertOk()->assertJsonCount(1, 'devices');
+        $this->getJson(route('admin.gps-devices.fleet', ['after' => -1]))->assertUnprocessable();
+    }
+
+    public function test_per_device_websocket_authorization_requires_an_admin_and_existing_device(): void
+    {
+        $admin = $this->actingAsSuperAdmin();
+        config(['broadcasting.default' => 'reverb']);
+        $device = $this->device();
+        require base_path('routes/channels.php');
+        $request = Request::create('/broadcasting/auth', 'POST', [
+            'socket_id' => '123.456', 'channel_name' => 'private-admin.gps.hardware.device.'.$device->id,
+        ]);
+        $request->setUserResolver(fn () => $admin);
+        $this->assertNotEmpty(Broadcast::driver('reverb')->auth($request));
+        $plain = $this->actingAsPlainUser();
+        $request->setUserResolver(fn () => $plain);
+        try {
+            Broadcast::driver('reverb')->auth($request);
+            $this->fail('Plain user subscribed to a device');
+        } catch (AccessDeniedHttpException) {
+            $this->assertTrue(true);
+        }
+        $request->setUserResolver(fn () => $admin);
+        $request->merge(['channel_name' => 'private-admin.gps.hardware.device.999999999']);
+        $this->expectException(AccessDeniedHttpException::class);
+        Broadcast::driver('reverb')->auth($request);
     }
 
     public function test_retention_keeps_latest_fix_and_installation_history(): void

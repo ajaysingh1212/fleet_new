@@ -6,6 +6,7 @@
 /public/storage
 /storage/*.key
 /storage/framework/gps-port-*.lock
+/storage/framework/gps-realtime-processes.json
 /storage/app/private/gps-tls/
 /storage/pail
 /vendor

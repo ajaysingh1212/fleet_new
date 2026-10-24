@@ -10,11 +10,12 @@ use Illuminate\Support\Facades\Storage;
 
 class VehicleController extends Controller
 {
-    public function index()
+    public function index(\Illuminate\Http\Request $request)
     {
         $this->authorize('viewAny', GpsDevice::class);
 
-        return view('admin.vehicles.index', ['vehicles' => Vehicle::orderBy('registration_number')->paginate(25)]);
+        $request->validate(['search'=>'nullable|string|max:100']);
+        return view('admin.vehicles.index', ['vehicles' => Vehicle::when($request->filled('search'),fn($q)=>$q->where(fn($s)=>$s->where('registration_number','like','%'.$request->search.'%')->orWhere('name','like','%'.$request->search.'%')))->orderBy('registration_number')->paginate(12)->withQueryString()]);
     }
 
     public function create()

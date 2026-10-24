@@ -21,44 +21,35 @@ class GpsDeviceController extends Controller
         $this->authorize('viewAny', GpsDevice::class);
         $request->validate(['search' => 'nullable|string|max:100', 'protocol' => 'nullable|string|max:40',
             'status' => 'nullable|in:active,inactive,maintenance,blocked,online,offline']);
-        $query = GpsDevice::with(['vehicle', 'latestLocation']);
-        if ($term = $request->query('search')) {
-            $query->where(fn ($q) => $q->where('identifier', 'like', '%'.$term.'%')
-                ->orWhere('name', 'like', '%'.$term.'%')->orWhereHas('vehicle', fn ($q) => $q->where('registration_number', 'like', '%'.$term.'%')));
-        }
-        if ($request->filled('protocol')) {
-            $query->where('protocol', $request->query('protocol'));
-        }
-        $status = $request->query('status');
-        if ($status === 'online') {
-            $query->where('status', 'active')->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds')));
-        } elseif ($status === 'offline') {
-            $query->where('status', 'active')->where(fn ($q) => $q->whereNull('last_packet_at')->orWhere('last_packet_at', '<', now()->subSeconds(config('gps.idle_seconds'))));
-        } elseif ($status) {
-            $query->where('status', $status);
-        }
+        $query = app(HardwareFleet::class)->query($request->only(['search', 'protocol', 'status']))
+            ->with(['vehicle', 'latestLocation']);
         $devices = $query->orderBy('id')->paginate(25)->withQueryString();
-        $online = GpsDevice::where('status', 'active')->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds')))->count();
-        $moving = GpsDevice::where('status', 'active')->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds')))
-            ->whereHas('latestLocation', fn ($q) => $q->where('speed', '>', 1.8))->count();
-        $stopped = GpsDevice::where('status', 'active')->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds')))
-            ->whereHas('latestLocation', fn ($q) => $q->whereNotNull('speed')->where('speed', '<=', 1.8))->count();
-        $stats = ['registered' => GpsDevice::count(), 'online' => $online,
-            'offline' => GpsDevice::where('status', 'active')->count() - $online,
-            'inactive' => GpsDevice::where('status', '!=', 'active')->count(),
+        $stats = ['registered' => GpsDevice::count(), 'online' => 0, 'offline' => 0, 'inactive' => 0,
+            'moving' => 0, 'stopped' => 0, 'parked' => 0,
             'pending identifiers' => DB::table('gps_packet_diagnostics')->where('reason', 'unauthorized_device')->whereNotNull('identifier')
-                ->whereNotIn('identifier', GpsDevice::select('identifier'))->distinct()->count('identifier'),
-            'moving' => $moving, 'stopped' => $stopped];
-        $positions = app(HardwareFleet::class)->snapshot();
+                ->whereNotIn('identifier', GpsDevice::select('identifier'))->distinct()->count('identifier')];
+        $fleetPage = app(HardwareFleet::class)->page($request->only(['search', 'protocol', 'status']));
+        $positions = $fleetPage['devices'];
+        $fleetMeta = $fleetPage['meta'];
+        foreach ($positions as $position) {
+            if ($position['device_id'] === null) continue;
+            $stats[$position['authorization'] !== 'active' ? 'inactive' : ($position['online'] ? 'online' : 'offline')]++;
+            if ($position['state'] === 'moving') $stats['moving']++;
+            if ($position['state'] === 'parked') $stats['parked']++;
+            if (in_array($position['state'], ['parked', 'idle', 'stopped'], true)) $stats['stopped']++;
+        }
 
-        return view('admin.gps-devices.index', compact('devices', 'stats', 'positions'));
+        return view('admin.gps-devices.index', compact('devices', 'stats', 'positions', 'fleetMeta'));
     }
 
-    public function fleet()
+    public function fleet(Request $request)
     {
         $this->authorize('viewAny', GpsDevice::class);
 
-        return response()->json(['devices' => app(HardwareFleet::class)->snapshot()])
+        $request->validate(['search' => 'nullable|string|max:100', 'protocol' => 'nullable|string|max:40',
+            'status' => 'nullable|in:active,inactive,maintenance,blocked,online,offline', 'after' => 'nullable|integer|min:0']);
+
+        return response()->json(app(HardwareFleet::class)->page($request->only(['search', 'protocol', 'status']), (int) $request->query('after', 0)))
             ->header('Cache-Control', 'private, no-store');
     }
 

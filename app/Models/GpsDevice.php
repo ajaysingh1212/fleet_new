@@ -31,11 +31,12 @@ class GpsDevice extends Model
 
     public function latestHeartbeat(): HasOne
     {
-        return $this->hasOne(GpsDeviceEvent::class)->ofMany(['id' => 'max'], fn ($query) => $query->where('type', 'heartbeat'));
+        return $this->hasOne(GpsDeviceEvent::class)->ofMany(['received_at' => 'max', 'id' => 'max'], fn ($query) => $query->where('type', 'heartbeat'));
     }
 
     public function getIsOnlineAttribute(): bool
     {
-        return $this->status === 'active' && $this->last_packet_at?->gt(now()->subSeconds(config('gps.idle_seconds')));
+        return $this->status === 'active' && $this->last_packet_at?->gt(now()->subSeconds(config('gps.idle_seconds')))
+            && (app(\App\Services\Gps\HardwareConnectionState::class)->snapshot($this->id)['connection_connected'] ?? true);
     }
 }

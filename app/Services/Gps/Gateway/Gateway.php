@@ -4,6 +4,7 @@ namespace App\Services\Gps\Gateway;
 
 use App\Jobs\CloseHardwareSession;
 use App\Jobs\ProcessHardwarePacket;
+use App\Jobs\DeliverHardwarePacket;
 use App\Jobs\StoreHardwareDiagnostic;
 use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
@@ -62,7 +63,8 @@ final class Gateway
                 $connection->connectedAt, $connection->peer, $connection->protocol->name(), $packet->version,
                 $packet->type, hash('sha256', $frame), array_map(fn ($location) => $location->toArray(), $packet->locations),
                 $packet->events, now()->utc()->format('Y-m-d H:i:s'), $device['vehicle_id']);
-            $queue->push($job, '', config('gps.queue'));
+            $queue->push(config('gps.live_first') ? new DeliverHardwarePacket($job, config('gps.queue_connection')) : $job, '', config('gps.queue'));
+            app(\App\Services\Gps\HardwareConnectionState::class)->touch($device['id'], $connection->id);
             $out .= $packet->ack;
         }
 
@@ -94,6 +96,7 @@ final class Gateway
         if (! $connection->device) {
             return;
         }
+        app(\App\Services\Gps\HardwareConnectionState::class)->close($connection->device['id'], $connection->id);
         $queue = Queue::connection(config('gps.queue_connection'));
         if ($queue->size(config('gps.queue')) >= config('gps.max_queue')) {
             return;

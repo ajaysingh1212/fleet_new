@@ -28,6 +28,17 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(function () {
     Route::middleware(['can:viewAny,App\Models\GpsDevice', 'throttle:60,1'])->group(function () {
+        Route::get('monitoring/history', [\App\Http\Controllers\Admin\HardwareGpsHistoryController::class, 'index'])->name('monitoring.history');
+        Route::get('monitoring/history/targets', [\App\Http\Controllers\Admin\HardwareGpsHistoryController::class, 'targets'])->name('monitoring.history.targets');
+        Route::get('monitoring/history/data', [\App\Http\Controllers\Admin\HardwareGpsHistoryController::class, 'data'])->name('monitoring.history.data');
+        Route::get('vehicle-geofences/targets', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'targets'])->name('vehicle-geofences.targets');
+        Route::delete('vehicle-geofences/{id}', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'destroy'])->whereNumber('id')->name('vehicle-geofences.destroy');
+        Route::get('vehicle-geofences/vehicles', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'vehicles'])->name('vehicle-geofences.vehicles');
+        Route::get('vehicle-geofences/alerts', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'alerts'])->name('vehicle-geofences.alerts');
+        Route::get('vehicle-geofences', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'index'])->name('vehicle-geofences.index');
+        Route::post('vehicle-geofences', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'store'])->name('vehicle-geofences.store');
+        Route::put('vehicle-geofences/{id}', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'update'])->whereNumber('id')->name('vehicle-geofences.update');
+        Route::patch('vehicle-geofences/{id}/status', [\App\Http\Controllers\Admin\VehicleGeofenceController::class, 'status'])->whereNumber('id')->name('vehicle-geofences.status');
         Route::get('gps-devices/diagnostics', [GpsDeviceController::class, 'diagnostics'])->name('gps-devices.diagnostics');
         Route::get('gps-devices/fleet', [GpsDeviceController::class, 'fleet'])->name('gps-devices.fleet');
         Route::get('gps-devices/{gpsDevice}/documents/{index}', [GpsDeviceController::class, 'document'])->whereNumber('index')->name('gps-devices.document');
@@ -76,7 +87,6 @@ Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(
 
     Route::middleware('permission:manage geofences|manage tracked geofences')->group(function () {
         Route::get('monitoring/dashboard', [MonitoringController::class, 'dashboard'])->name('monitoring.dashboard');
-        Route::get('monitoring/history', [MonitoringController::class, 'history'])->name('monitoring.history');
         Route::get('monitoring/replay', [MonitoringController::class, 'replay'])->name('monitoring.replay');
     });
 

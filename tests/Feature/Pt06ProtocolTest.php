@@ -165,9 +165,9 @@ class Pt06ProtocolTest extends TestCase
         return hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/pt06/pdf-'.$name.'.hex'))));
     }
 
-    private function frame(int $type, string $payload, bool $extended = false): string
+    private function frame(int $type, string $payload, bool $extended = false, string $serial = "\x00\x01"): string
     {
-        $body = chr($type).$payload."\x00\x01";
+        $body = chr($type).$payload.$serial;
         $data = ($extended ? pack('n', strlen($body) + 2) : chr(strlen($body) + 2)).$body;
 
         return ($extended ? "\x79\x79" : "\x78\x78").$data.pack('n', ConcoxX1::crc($data))."\r\n";
@@ -196,7 +196,7 @@ class Pt06ProtocolTest extends TestCase
         $p = new Pt06;
         $packet = $p->decode($this->fixture('location'), true);
         $gps = $packet->locations[0];
-        $this->assertSame('', $packet->ack);
+        $this->assertSame($this->frame(0x22, '', false, substr($this->fixture('location'), -6, 2)), $packet->ack);
         $this->assertEqualsWithDelta(12.8852583333, $gps->latitude, 0.0000001);
         $this->assertEqualsWithDelta(74.879855, $gps->longitude, 0.0000001);
         $this->assertSame('2022-04-23 13:47:29', $gps->recordedAt->format('Y-m-d H:i:s'));
@@ -226,6 +226,17 @@ class Pt06ProtocolTest extends TestCase
         $this->assertNull($heartbeat->events['power_level']);
         $this->assertSame(12.6, $heartbeat->events['external_voltage']);
         $this->assertTrue($heartbeat->events['acc']);
+    }
+
+    public function test_location_ack_matches_each_serial_and_can_be_disabled_for_strict_manual_compatibility(): void
+    {
+        $payload = substr($this->fixture('location'), 4, -6);
+        foreach (["\x00\x10", "\x12\x34", "\xff\xff"] as $serial) {
+            $frame = $this->frame(0x22, $payload, false, $serial);
+            $this->assertSame($this->frame(0x22, '', false, $serial), (new Pt06)->decode($frame, true)->ack);
+        }
+        config(['gps.pt06_location_ack' => false]);
+        $this->assertSame('', (new Pt06)->decode($frame, true)->ack);
     }
 
     public function test_simulated_lbs_sim_command_response_and_unknown_layouts(): void
@@ -304,10 +315,10 @@ class Pt06ProtocolTest extends TestCase
             usleep(20000);
             fwrite($socket, substr($this->fixture('login'), 5).$this->fixture('heartbeat').$this->fixture('location').$this->fixture('alarm'));
             $reply = '';
-            while (strlen($reply) < 30 && ($chunk = fread($socket, 30 - strlen($reply))) !== '' && $chunk !== false) {
+            while (strlen($reply) < 40 && ($chunk = fread($socket, 40 - strlen($reply))) !== '' && $chunk !== false) {
                 $reply .= $chunk;
             }
-            $this->assertSame($this->fixture('login-ack').$this->fixture('heartbeat-ack').$this->fixture('alarm-ack'), $reply);
+            $this->assertSame($this->fixture('login-ack').$this->fixture('heartbeat-ack').$this->frame(0x22, '', false, substr($this->fixture('location'), -6, 2)).$this->fixture('alarm-ack'), $reply);
             fclose($socket);
             $socket = null;
             $this->assertSame(0, $process->wait());

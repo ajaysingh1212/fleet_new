@@ -1,0 +1,133 @@
+<?php
+
+namespace App\Services\Gps;
+
+use App\Jobs\ProcessHardwarePacket;
+use App\Models\GpsDevice;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
+
+/** Small current-state cache; SQL remains the durable history, never the live clock. */
+final class HardwareLiveState
+{
+    private function store()
+    {
+        return Cache::store(config('gps.live_cache_store'));
+    }
+
+    private function key(int $id): string
+    {
+        return 'gps.live.device.'.$id;
+    }
+
+    public function forget(int $id): void
+    {
+        $this->store()->forget($this->key($id));
+    }
+
+    public function baseline(GpsDevice $device, HardwareFleet $fleet): array
+    {
+        $cached = $this->store()->get($this->key($device->id));
+        if ($cached && $cached['imei'] === $device->identifier && $cached['vehicle_id'] === $device->vehicle_id
+            && ($cached['protocol'] ?? null) === $device->protocol) {
+            // Warm path reads administrative authorization, not position/history.
+            return [...$cached, 'authorization' => $device->status, 'name' => $device->name,
+                'registration' => $device->vehicle?->registration_number,
+                'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
+                'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle')];
+        }
+
+        return $fleet->device($device);
+    }
+
+    public function overlay(array $base): array
+    {
+        $cached = $this->store()->get($this->key($base['device_id']));
+        if ($cached && $this->sameAssignment($base, $cached)) {
+            $base = $this->merge($base, $cached);
+        }
+
+        return $this->classify($base);
+    }
+
+    public function project(array $base, ProcessHardwarePacket $packet, string $receivedAt): array
+    {
+        return $this->store()->lock($this->key($packet->deviceId).'.lock', 10)->block(3, function () use ($base, $packet, $receivedAt) {
+            $state = $this->overlay($base);
+            $incoming = ['last_packet_at' => $receivedAt, 'live_received_at' => $receivedAt];
+            foreach ($packet->locations as $location) {
+                if (! $location['gps_fix']) continue;
+                $time = CarbonImmutable::parse($location['recorded_at'], 'UTC')->toIso8601String();
+                if (! empty($incoming['recorded_at']) && $incoming['recorded_at'] >= $time) continue;
+                $incoming = [...$incoming, 'recorded_at' => $time, 'received_at' => $receivedAt,
+                    'latitude' => $location['latitude'], 'longitude' => $location['longitude'],
+                    'speed' => $location['speed'], 'heading' => $location['heading']];
+                if (isset($location['telemetry']['acc'])) {
+                    $incoming = [...$incoming, 'acc_reported' => $location['telemetry']['acc'], 'acc_reported_at' => $time, 'acc_source' => 'location'];
+                }
+            }
+            if ($packet->type === 'heartbeat') {
+                if (isset($packet->events['acc'])) {
+                    $incoming = [...$incoming, 'acc_reported' => $packet->events['acc'], 'acc_reported_at' => $receivedAt, 'acc_source' => 'heartbeat'];
+                }
+                if (isset($packet->events['gps_positioned_reported'])) {
+                    $incoming = [...$incoming, 'gps_positioned_reported' => $packet->events['gps_positioned_reported'], 'gps_reported_at' => $receivedAt];
+                }
+            }
+            $state = $this->merge($state, $incoming);
+            $state['live_revision'] = ($state['live_revision'] ?? 0) + 1;
+            $state = $this->classify($state);
+            $this->store()->put($this->key($packet->deviceId), $state, now()->addDay());
+
+            return $state;
+        });
+    }
+
+    private function sameAssignment(array $a, array $b): bool
+    {
+        return ($a['imei'] ?? null) === ($b['imei'] ?? null) && $a['vehicle_id'] === $b['vehicle_id']
+            && ($a['protocol'] ?? null) === ($b['protocol'] ?? null);
+    }
+
+    private function time(?string $value): float
+    {
+        return $value ? (float) CarbonImmutable::parse($value)->format('U.u') : 0;
+    }
+
+    private function merge(array $base, array $incoming): array
+    {
+        foreach ([['last_packet_at', ['last_packet_at']],
+            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at']],
+            ['acc_reported_at', ['acc_reported', 'acc_reported_at', 'acc_source']],
+            ['gps_reported_at', ['gps_positioned_reported', 'gps_reported_at']],
+            ['live_received_at', ['live_received_at', 'live_revision']]] as [$clock, $fields]) {
+            if (! empty($incoming[$clock]) && $this->time($incoming[$clock]) >= $this->time($base[$clock] ?? null)) {
+                foreach ($fields as $field) if (array_key_exists($field, $incoming)) $base[$field] = $incoming[$field];
+            }
+        }
+
+        return $base;
+    }
+
+    private function classify(array $p): array
+    {
+        $cutoff = (float) now()->subSeconds(config('gps.idle_seconds'))->format('U.u');
+        $p = [...$p, ...app(HardwareConnectionState::class)->snapshot($p['device_id'])];
+        $p['online'] = $p['authorization'] === 'active' && $this->time($p['last_packet_at'] ?? null) >= $cutoff
+            && ($p['connection_connected'] ?? true);
+        $p['acc'] = $this->time($p['acc_reported_at'] ?? null) >= $cutoff ? ($p['acc_reported'] ?? null) : null;
+        if (isset($p['gps_reported_at']) && $this->time($p['gps_reported_at']) < $cutoff) $p['gps_positioned_reported'] = null;
+        if ($this->time($p['gps_reported_at'] ?? null) < $this->time($p['recorded_at'] ?? null)) $p['gps_positioned_reported'] = null;
+        $p['gps_fresh_seconds'] = config('gps.fresh_seconds', 15);
+        $fresh = ! empty($p['recorded_at']) && $this->time($p['recorded_at']) >= (float) now()->subSeconds($p['gps_fresh_seconds'])->format('U.u');
+        $p['gps_state'] = empty($p['recorded_at']) ? 'awaiting_gps' : (($p['gps_positioned_reported'] ?? null) === false ? 'no_gps_fix' : ($fresh ? 'fresh' : 'stale_gps'));
+        $p['gps_fresh'] = $p['gps_state'] === 'fresh';
+        $p['state'] = $p['authorization'] !== 'active' ? $p['authorization'] : (! $p['online'] ? 'offline' :
+            ($p['gps_fresh'] && ($p['speed'] ?? 0) > 1.8
+                && ! ($p['acc'] === false && $this->time($p['acc_reported_at'] ?? null) > $this->time($p['recorded_at'] ?? null)) ? 'moving' : ($p['acc'] === false ? 'parked' :
+                (! $p['gps_fresh'] ? $p['gps_state'] : (($p['speed'] ?? null) === null ? 'unknown' : ($p['acc'] === true ? 'idle' : 'stopped'))))));
+        $p['observed_at'] = now()->utc()->format('Y-m-d\TH:i:s.u\Z');
+
+        return $p;
+    }
+}

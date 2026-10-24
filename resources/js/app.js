@@ -25,6 +25,7 @@ try {
 
 document.addEventListener('DOMContentLoaded', () => {
     initHardwareGps();
+    if (document.getElementById('hardware-history')) import('./hardware-gps-history').then(({initHardwareGpsHistory}) => initHardwareGpsHistory());
     initThemeCustomizer();
     initNotificationCenter();
     initIncomingCallRinger();

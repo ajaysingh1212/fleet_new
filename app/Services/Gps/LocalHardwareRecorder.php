@@ -3,9 +3,11 @@
 namespace App\Services\Gps;
 
 use App\Jobs\ProcessHardwarePacket;
+use App\Jobs\DeliverHardwarePacket;
 use App\Models\GpsDevice;
 use App\Services\Gps\Gateway\Packet;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
 
 /** Explicit local terminal persistence; production Redis gateway remains separate. */
@@ -19,6 +21,25 @@ final class LocalHardwareRecorder
 
     public function record(Packet $packet, string $frame, string $imei, string $profile, string $session, string $connectedAt, string $peer): void
     {
+        if (config('gps.live_first')) {
+            $device = GpsDevice::where('identifier', $imei)->first();
+            if (! $device || $device->status !== 'active' || $device->protocol !== $profile || $device->protocol_version !== $packet->version) {
+                throw new InvalidArgumentException('persistence_requires_active_registered_device_and_matching_protocol');
+            }
+            $connection = (string) config('gps.live_connection');
+            $queue = Queue::connection($connection);
+            if ($queue->size(config('gps.live_queue')) >= config('gps.max_queue')) {
+                throw new InvalidArgumentException('queue_full');
+            }
+            $job = new ProcessHardwarePacket($device->id, $imei, $session, $connectedAt, $peer, $profile,
+                $packet->version, $packet->type, hash('sha256', $frame),
+                array_map(fn ($location) => $location->toArray(), $packet->locations), $packet->events,
+                now()->utc()->format('Y-m-d H:i:s'), $device->vehicle_id, false);
+            $queue->push(new DeliverHardwarePacket($job, $connection, (bool) config('gps.local_broadcast')), '', config('gps.live_queue'));
+            app(HardwareConnectionState::class)->touch($device->id, $session);
+
+            return;
+        }
         DB::transaction(function () use ($packet, $frame, $imei, $profile, $session, $connectedAt, $peer) {
             $device = GpsDevice::where('identifier', $imei)->lockForUpdate()->first();
             if (! $device || $device->status !== 'active' || $device->protocol !== $profile || $device->protocol_version !== $packet->version) {
@@ -27,7 +48,8 @@ final class LocalHardwareRecorder
             (new ProcessHardwarePacket($device->id, $imei, $session, $connectedAt, $peer, $profile,
                 $packet->version, $packet->type, hash('sha256', $frame),
                 array_map(fn ($location) => $location->toArray(), $packet->locations), $packet->events,
-                now()->utc()->format('Y-m-d H:i:s'), $device->vehicle_id, false))->handle();
+                now()->utc()->format('Y-m-d H:i:s'), $device->vehicle_id, (bool) config('gps.local_broadcast')))->handle();
         });
+        app(HardwareConnectionState::class)->touch((int) GpsDevice::where('identifier', $imei)->value('id'), $session);
     }
 }

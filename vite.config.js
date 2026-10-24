@@ -19,6 +19,7 @@ export default defineConfig({
                 'resources/js/live-map.js',
                 'resources/js/private-chat.js',
                 'resources/js/geofence-manager.js',
+                'resources/js/vehicle-geofences.js',
                 'resources/js/report-page.js',
                 'resources/js/field-task-form.js',
                 'resources/js/field-task-show.js',
