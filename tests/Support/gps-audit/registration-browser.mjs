@@ -1,0 +1,108 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+
+// Uses only the benchmark's owned database, services and dummy login.
+export async function registrationBrowser({page, run, base, sendFix, waitFor}) {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`${base}/admin/device-models/create`);
+    await page.locator('#name').fill('Browser PT06 model');
+    await page.locator('#manufacturer').fill('Browser fixture');
+    await page.locator('#protocol').selectOption('pt06');
+    await page.locator('#protocol_version').fill('2022.4.27-v2');
+    await page.locator('#network_generation').selectOption('4G');
+    await page.locator('#active').selectOption('1');
+    await Promise.all([page.waitForURL('**/admin/device-models'), page.getByRole('button', {name:'Save model', exact:true}).click()]);
+    assert.equal(await page.locator('h4').filter({hasText:'Browser PT06 model'}).count(), 1);
+    await page.goto(`${base}/admin/vehicles/create`);
+    await page.locator('#registration_number').fill('BR-UI-TRACK');
+    await page.locator('#name').fill('Browser test truck');
+    await page.locator('#owner_user_id').selectOption({index:1});
+    await page.locator('input[name="details[icon]"][value="truck"]').check();
+    await page.locator('#registration-next').click();
+    await page.locator('#device_device_model_id').selectOption({label:'Browser PT06 model · PT06 · 4G'});
+    await page.locator('#device_identifier').fill('990000000000004');
+    await page.locator('#device_status').selectOption('active');
+    await page.locator('#device_serial_number').fill('PRODUCT-UI-1');
+    await page.locator('#device_vts').fill('VTS-UI-1');
+    assert.match(await page.locator('#device-model-summary').textContent(), /PT06.*4G/);
+    await page.locator('#registration-next').click();
+    await page.locator('#device_sim_number').fill('+919876543210');
+    await page.locator('#device_network_provider').selectOption('Jio');
+    await page.locator('#device_sim_generation').selectOption('4G');
+    await page.locator('#registration-next').click();
+    await page.locator('#details_initial_odometer').fill('125000');
+    await page.locator('#details_odometer_source').selectOption('manual');
+    await page.locator('#registration-next').click();
+    const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6ioAAAAASUVORK5CYII=', 'base64');
+    await page.locator('#vehicle_images').setInputFiles({name:'truck.png', mimeType:'image/png', buffer:image});
+    await page.locator('#other_images').setInputFiles({name:'installation.png', mimeType:'image/png', buffer:image});
+    await page.locator('#documents').setInputFiles({name:'insurance.pdf', mimeType:'application/pdf', buffer:Buffer.from('%PDF-1.4\nfixture')});
+    assert.equal(await page.locator('.registration-previews figure').count(),3);
+    await Promise.all([page.waitForURL('**/admin/vehicles/*/edit'),page.locator('#registration-save').click()]);
+    const editUrl = page.url();
+    const vehicleUrl = editUrl.replace('/edit','');
+    assert.equal(await page.locator('.alert-danger').count(),0);
+    await page.screenshot({path:path.join(run,'registration-desktop.png'),fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const mobile = await page.evaluate(()=>Object.fromEntries(['.registration-layout','.registration-rail','.registration-main','#registration_number','#owner_user_id','#registration-next'].map(selector=>{
+        const el=document.querySelector(selector),r=el.getBoundingClientRect();return [selector,{left:r.left,right:r.right,width:r.width}];
+    })));
+    fs.writeFileSync(path.join(run,'registration-mobile-layout.json'),JSON.stringify(mobile,null,2));
+    await page.screenshot({path:path.join(run,'registration-mobile.png'),fullPage:true});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1), 'Mobile registration overflows viewport');
+    assert.ok(mobile['#registration_number'].right < 390 && mobile['#registration-next'].right < 390, 'Mobile form controls are clipped');
+    await page.setViewportSize({width:1500,height:950});
+    await page.goto(vehicleUrl);
+    assert.match(await page.locator('.app-content').textContent(),/PRODUCT-UI-1/);
+    assert.match(await page.locator('.app-content').textContent(),/VTS-UI-1/);
+    assert.equal(await page.locator('.registration-saved article').count(),3);
+    await page.goto(`${base}/admin/vehicles`);
+    assert.equal(await page.locator('.vehicle-card:not(.pending-device-card)').count(),1);
+    assert.match(await page.locator('.vehicle-card:not(.pending-device-card)').textContent(),/990000000000004/);
+    await sendFix();
+    await page.goto(`${base}/dashboard`);
+    await waitFor(()=>page.locator('.fleet-dashboard-marker .fa-truck').count());
+    const dashboardIcon = await page.locator('.fleet-dashboard-marker .fa-truck').count();
+    await page.goto(`${base}/admin/gps-devices`);
+    await waitFor(()=>page.locator('.fleet-marker .fa-truck').count());
+    const gpsIcon = await page.locator('.fleet-marker .fa-truck').count();
+    await page.goto(editUrl);
+    await page.locator('#name').fill('Browser truck edited');
+    await page.locator('[data-step="4"]').click();
+    await page.locator('input[name="remove_documents[]"]').first().check();
+    await Promise.all([page.waitForURL(editUrl),page.locator('#registration-save').click()]);
+    await page.goto(vehicleUrl);
+    assert.equal(await page.locator('.registration-saved article').count(),2);
+    await page.locator('summary').filter({hasText:'Delete vehicle'}).click();
+    await page.locator('input[type=checkbox]').check();
+    await Promise.all([page.waitForURL('**/admin/vehicles'),page.getByRole('button',{name:'Delete vehicle',exact:true}).click()]);
+    assert.equal(await page.locator('.vehicle-card:not(.pending-device-card)').count(),0);
+    assert.equal(await page.locator('.pending-device-card').count(),3);
+    // Complete an existing orphan's registration through its own pending card.
+    // Send a real fix first; adding its number must not lose the last-known fix.
+    await sendFix(1);
+    await new Promise(resolve=>setTimeout(resolve,600));
+    await page.locator('.pending-device-card').filter({hasText:'990000000000001'}).getByRole('link',{name:'Add vehicle number'}).click();
+    await page.locator('#registration_number').fill('BR-ORPHAN-UI');
+    await page.locator('#name').fill('Completed orphan registration');
+    await page.locator('input[name="details[icon]"][value="bike"]').check();
+    assert.equal(await page.locator('#device_identifier').inputValue(),'990000000000001');
+    await page.locator('[data-step="4"]').click();
+    await Promise.all([page.waitForURL('**/admin/vehicles/*/edit'),page.locator('#registration-save').click()]);
+    assert.equal(await page.locator('.alert-danger').count(),0);
+    await page.goto(`${base}/admin/vehicles`);
+    assert.equal(await page.locator('.pending-device-card').count(),2);
+    assert.match(await page.locator('.vehicle-card:not(.pending-device-card)').textContent(),/BR-ORPHAN-UI/);
+    await page.screenshot({path:path.join(run,'vehicles-with-pending-devices.png'),fullPage:true});
+    await page.goto(`${base}/dashboard`);
+    await waitFor(()=>page.locator('.fleet-dashboard-marker .fa-motorcycle').count());
+    assert.deepEqual(errors,[]);
+    const result = {combined_registration:true,model_created:true,private_attachments:3,attachment_removal:true,
+        edit:true,delete:true,orphan_registration_completed:true,orphan_last_fix_retained:true,
+        dashboard_truck_icons:dashboardIcon,gps_map_truck_icons:gpsIcon,mobile_no_overflow:true,browser_errors:errors};
+    fs.writeFileSync(path.join(run,'registration-results.json'),JSON.stringify(result,null,2));
+    console.log(JSON.stringify({run,...result},null,2));
+}

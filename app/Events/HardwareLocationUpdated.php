@@ -53,6 +53,7 @@ class HardwareLocationUpdated implements ShouldBroadcast
         return ['device_id' => $device->id, 'vehicle_id' => $location->vehicle_id,
             'registration' => $device->vehicle?->registration_number,
             'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle'),
+            'vehicle_icon' => config('fleet.icons.'.($device->vehicle?->details['icon'] ?? $device->vehicle?->details['type'] ?? 'car').'.icon', 'fa-car-side'),
             'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
             'acc' => $location->telemetry['acc'] ?? null, 'authorization' => $device->status,
             'acc_reported' => $location->telemetry['acc'] ?? null,

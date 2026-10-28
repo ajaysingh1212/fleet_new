@@ -1,0 +1,19 @@
+@extends('layouts.app')
+@section('page-title', $vehicle->registration_number)
+@push('styles') @vite('resources/css/vehicle-registration.css') @endpush
+@section('content')
+@php($device = $vehicle->gpsDevice)
+<div class="d-flex flex-wrap gap-3 justify-content-between mb-4"><div><span class="registration-eyebrow">VEHICLE PROFILE</span><h2 class="fw-bold mt-2">{{ $vehicle->registration_number }}</h2><p class="text-muted">{{ $vehicle->name }} · {{ ucfirst($vehicle->status) }}</p></div><div><a class="btn btn-light" href="{{ route('admin.vehicles.index') }}">All vehicles</a> <a class="btn btn-primary" href="{{ route('admin.vehicles.edit',$vehicle) }}">Edit registration</a> <a class="btn btn-outline-primary" href="{{ route('admin.gps-devices.index', ['search'=>$device?->identifier ?? $vehicle->registration_number]) }}">Live map</a></div></div>
+<div class="row g-4">
+<div class="col-lg-6"><div class="card border-0 shadow-sm rounded-4 h-100"><div class="card-body p-4"><h4 class="fw-bold mb-4"><i class="fa-solid {{ config('fleet.icons.'.($vehicle->details['icon'] ?? 'car').'.icon','fa-car-side') }} text-primary me-2"></i>Vehicle & operations</h4><dl class="row">
+@foreach(collect($vehicle->details ?? [])->except(['documents'])->all() as $key=>$value)<dt class="col-5 text-muted fw-normal mb-2">{{ ucwords(str_replace('_',' ',$key)) }}</dt><dd class="col-7">{{ is_scalar($value) ? $value : '—' }}</dd>@endforeach
+</dl></div></div></div>
+<div class="col-lg-6"><div class="card border-0 shadow-sm rounded-4 h-100"><div class="card-body p-4"><h4 class="fw-bold mb-4"><i class="fa-solid fa-satellite-dish text-primary me-2"></i>GPS & SIM</h4>
+@if($device)<dl class="row">@foreach(['identifier'=>'IMEI','status'=>'Device status','model'=>'Model','manufacturer'=>'Manufacturer','protocol'=>'Protocol','protocol_version'=>'Protocol version'] as $key=>$label)<dt class="col-5 text-muted fw-normal mb-2">{{ $label }}</dt><dd class="col-7">{{ $device->$key ?: '—' }}</dd>@endforeach
+@foreach(['network_generation'=>'Device network','sim_number'=>'SIM number','network_provider'=>'SIM provider','sim_generation'=>'SIM network','sim_iccid'=>'ICCID','serial_number'=>'Product serial number','vts'=>'VTS reference','firmware_version'=>'Firmware'] as $key=>$label)<dt class="col-5 text-muted fw-normal mb-2">{{ $label }}</dt><dd class="col-7">{{ $device->details[$key] ?? '—' }}</dd>@endforeach</dl><a href="{{ route('admin.gps-devices.show',$device) }}">Device history & telemetry →</a>
+@else<p class="text-muted">No tracker installed.</p>@endif
+</div></div></div>
+<div class="col-12"><div class="card border-0 shadow-sm rounded-4"><div class="card-body p-4"><h4>Photos & documents</h4><div class="registration-saved">@forelse($vehicle->details['documents'] ?? [] as $index=>$document)<article>@if(in_array($document['mime'] ?? '',['image/jpeg','image/png','image/webp']))<img src="{{ route('admin.vehicles.document',[$vehicle,$index,'preview'=>1]) }}" alt="{{ $document['name'] }}" loading="lazy">@else<i class="fa-solid fa-file-lines fs-2 text-primary"></i>@endif<a href="{{ route('admin.vehicles.document',[$vehicle,$index]) }}">{{ $document['name'] }}</a><small class="text-muted">{{ ucfirst($document['kind'] ?? 'document') }}</small></article>@empty<p class="text-muted">No attachments uploaded.</p>@endforelse</div></div></div></div>
+<div class="col-12"><details class="border rounded-4 p-4"><summary class="text-danger fw-semibold">Delete vehicle</summary><p class="small mt-3">Remove this vehicle from the active fleet and disable its tracker. Historical tracking records are retained.</p><form method="post" action="{{ route('admin.vehicles.destroy',$vehicle) }}">@csrf @method('DELETE')<label class="d-block mb-3"><input type="checkbox" required> Delete {{ $vehicle->registration_number }} from the active fleet</label><button class="btn btn-outline-danger">Delete vehicle</button></form></details></div>
+</div>
+@endsection

@@ -26,6 +26,11 @@ class GpsDevice extends Model
         return $this->belongsTo(Vehicle::class);
     }
 
+    public function deviceModel(): BelongsTo
+    {
+        return $this->belongsTo(GpsDeviceModel::class, 'gps_device_model_id');
+    }
+
     public function latestLocation(): BelongsTo
     {
         return $this->belongsTo(GpsDeviceLocation::class, 'latest_location_id');

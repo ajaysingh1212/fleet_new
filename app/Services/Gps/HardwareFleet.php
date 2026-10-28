@@ -107,6 +107,7 @@ final class HardwareFleet
             'protocol' => $device->protocol, 'model' => $device->model,
             'vehicle_id' => $device->vehicle_id, 'registration' => $device->vehicle?->registration_number,
             'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle'),
+            'vehicle_icon' => config('fleet.icons.'.($device->vehicle?->details['icon'] ?? $device->vehicle?->details['type'] ?? 'car').'.icon', 'fa-car-side'),
             'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
             'authorization' => $device->status, 'online' => $online, 'state' => $state,
             ...$presence,

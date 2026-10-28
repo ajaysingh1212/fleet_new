@@ -7,6 +7,7 @@ import {HardwareFleetStream} from './hardware-fleet-stream.js';
 import {initFleetConsole} from './fleet-console.js';
 import {warningLabel} from './fleet-geofence-alerts.js';
 import {browserReceived, markerDrawn} from './gps-pipeline-metrics.js';
+import {vehicleIcon} from './vehicle-icons.js';
 
 const colors = {moving: '#16803c', idle: '#c77c00', parked: '#2563eb', stopped: '#2563eb', offline: '#64748b', stale_gps: '#a16207', awaiting_gps: '#a16207', no_gps_fix: '#a16207'};
 const car = '<path d="M5 15l2-6h10l2 6M4 15h16v6H4zM7 21v3m10-3v3M8 12h8"/>';
@@ -34,7 +35,7 @@ export function initHardwareGps() {
         document.getElementById('hardware-page-prev').disabled = cursors.length < 2 || liveState === 'syncing';
     };
     const icon = p => L.divIcon({className: `fleet-marker${consoleUi?.hasAlerts(p.device_id) ? (consoleUi.getAlerts(p.device_id).every(a=>a.historical) ? ' has-violation violation-historical' : ' has-violation') : ''}`, iconSize: [38, 38], iconAnchor: [19, 19],
-        html: `<div class="fleet-marker-body" style="background:${colors[fleetState(p)] ?? '#64748b'};border:3px solid white;border-radius:50%;width:38px;height:38px;box-shadow:0 2px 7px #0006;display:grid;place-items:center"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${['bike', 'motorcycle', 'motorbike'].includes(p.vehicle_type) ? bike : car}</svg></div>`});
+        html: `<div class="fleet-marker-body" style="background:${colors[fleetState(p)] ?? '#64748b'};border:3px solid white;border-radius:50%;width:38px;height:38px;box-shadow:0 2px 7px #0006;display:grid;place-items:center;color:white;font-size:19px"><i class="fa-solid ${vehicleIcon(p)}" aria-hidden="true"></i></div>`});
     const popup = p => {
         const node = document.createElement('div');
         const display = fleetPresentation(p);
@@ -105,7 +106,7 @@ export function initHardwareGps() {
         if (point(p)) {
             let marker = markers.get(id);
             const newer = !old || Date.parse(p.recorded_at) > Date.parse(old.recorded_at);
-            const appearance = `${fleetState(p)}:${p.vehicle_type}:${(consoleUi?.getAlerts(p.device_id)??[]).map(a=>`${a.rule_id}:${a.type}:${a.historical}`).join(',')}`;
+            const appearance = `${fleetState(p)}:${vehicleIcon(p)}:${(consoleUi?.getAlerts(p.device_id)??[]).map(a=>`${a.rule_id}:${a.type}:${a.historical}`).join(',')}`;
             if (!marker) {
                 marker = L.marker([p.latitude, p.longitude], {icon: icon(p)}).addTo(map);
                 // Updating an open popup must not pan the map on every GPS packet.

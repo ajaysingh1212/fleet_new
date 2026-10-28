@@ -24,6 +24,8 @@ export default defineConfig({
                 'resources/js/report-page.js',
                 'resources/js/field-task-form.js',
                 'resources/js/field-task-show.js',
+                'resources/js/vehicle-registration.js',
+                'resources/css/vehicle-registration.css',
             ],
             refresh: true,
         }),

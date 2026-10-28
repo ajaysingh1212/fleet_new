@@ -100,6 +100,11 @@ try {
     await page.goto(`http://127.0.0.1:${ports.web}/login`);
     await page.locator('#email').fill('gps-audit@example.invalid');await page.locator('#password').fill('Isolated-audit-password-7391');
     await Promise.all([page.waitForURL('**/dashboard'),page.locator('button[type=submit]').click()]);
+    if(process.argv.includes('--registration')) {
+        const {registrationBrowser} = await import('./registration-browser.mjs');
+        await registrationBrowser({page,run,base:`http://127.0.0.1:${ports.web}`,waitFor,
+            sendFix:async(deviceIndex=4)=>{const d=await connect(deviceIndex);await send(d.socket,location(deviceIndex-1,1,20));}});
+    } else {
     await waitFor(()=>page.evaluate(()=>window.Echo?.connector?.pusher?.connection?.state==='connected' && document.querySelector('[data-dashboard-stat=total]')?.textContent==='3'));
     const stage=await page.locator('#fleet-dashboard').boundingBox();
     const ui={stage_height:stage.height,viewport_height:950,drawers_closed:await page.locator('.offcanvas.show').count()===0};
@@ -157,6 +162,7 @@ try {
     fs.writeFileSync(path.join(run,'results.json'),JSON.stringify(result,null,2));
     console.log(JSON.stringify({run,...result},null,2));
     if(result.history_loss||result.unexpected_disconnects||result.failed_jobs||result.browser_errors.length||!metrics.length)process.exitCode=1;
+    }
 } catch(e) {console.error(`Audit benchmark failed: ${e.message}\nPrivate diagnostic artifacts: ${run}`);process.exitCode=1;}
 finally {
     clearInterval(poolTimer);

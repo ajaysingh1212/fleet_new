@@ -168,9 +168,9 @@ body:has(#fleet-map-stage) .app-content>.container-fluid{padding:8px}
                 <p>Saari gaadiyan, saare GPS devices — ek hi screen par live.</p>
             </div>
             <div class="fleet-actions">
-                <a class="fleet-btn fleet-btn-light" href="{{ route('admin.gps-devices.create') }}">
+                <a class="fleet-btn fleet-btn-light" href="{{ route('admin.vehicles.create') }}">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-                    Register device
+                    Register vehicle & GPS
                 </a>
                 <a class="fleet-btn fleet-btn-ghost" href="{{ route('admin.vehicles.index') }}">Vehicles</a>
                 <a class="fleet-btn fleet-btn-ghost" href="{{ route('admin.gps-devices.diagnostics') }}">Pending / diagnostics</a>

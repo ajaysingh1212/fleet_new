@@ -13,12 +13,12 @@ use Predis\PredisException;
 
 class HardwareRegistrationService
 {
-    public function save(array $data, ?GpsDevice $device = null): GpsDevice
+    public function save(array $data, ?GpsDevice $device = null, bool $initialRegistration = false): GpsDevice
     {
         $oldIdentifier = $device?->identifier;
         // SQL is authoritative. Unique constraints and assignment row locks
         // protect registration independently of gateway/cache availability.
-        $saved = $this->persist($data, $device);
+        $saved = $this->persist($data, $device, $initialRegistration);
         if (config('gps.live_first')) {
             app(HardwareLiveState::class)->forget($saved->id);
         }
@@ -33,9 +33,9 @@ class HardwareRegistrationService
         return $saved;
     }
 
-    private function persist(array $data, ?GpsDevice $device): GpsDevice
+    private function persist(array $data, ?GpsDevice $device, bool $initialRegistration): GpsDevice
     {
-        return DB::transaction(function () use ($data, $device) {
+        return DB::transaction(function () use ($data, $device, $initialRegistration) {
             $device = $device ? GpsDevice::lockForUpdate()->findOrFail($device->id) : new GpsDevice;
             $vehicleId = $data['vehicle_id'] ?? null;
             if (! empty($data['new_vehicle']['registration_number'])) {
@@ -52,7 +52,7 @@ class HardwareRegistrationService
                 }
             }
             $oldVehicle = $device->vehicle_id;
-            $device->fill(collect($data)->only(['name', 'identifier', 'imei', 'manufacturer', 'model', 'protocol', 'protocol_version', 'status', 'details', 'configuration'])->all());
+            $device->fill(collect($data)->only(['name', 'identifier', 'imei', 'manufacturer', 'model', 'gps_device_model_id', 'protocol', 'protocol_version', 'status', 'details', 'configuration'])->all());
             $device->vehicle_id = $vehicleId;
             if (! $device->exists || $device->isDirty('configuration')) {
                 $device->configuration_updated_at = now();
@@ -66,7 +66,12 @@ class HardwareRegistrationService
                         'vehicle_id' => $vehicleId, 'installed_at' => now()]);
                 }
                 // A location measured before reassignment must not appear on the new vehicle.
-                $device->forceFill(['latest_location_id' => null])->saveQuietly();
+                // Completing an existing unassigned tracker's first vehicle
+                // registration may retain its own unassigned last-known fix.
+                // Transfers between vehicles still always clear the pointer.
+                if (! ($initialRegistration && $oldVehicle === null && $device->latestLocation?->vehicle_id === null)) {
+                    $device->forceFill(['latest_location_id' => null])->saveQuietly();
+                }
             }
 
             return $device;

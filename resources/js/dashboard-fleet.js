@@ -8,6 +8,7 @@ import {fleetState, fleetPresentation, mergeFleetUpdate} from './hardware-gps-mo
 import {liveGeofenceWarnings, warningLabel} from './fleet-geofence-alerts.js';
 import {fleetKey, fleetLabel, streetDetailZoom} from './dashboard-fleet-model.js';
 import {browserReceived, markerDrawn} from './gps-pipeline-metrics.js';
+import {vehicleIcon} from './vehicle-icons.js';
 import {stateName, insideFeature, hasPosition, labelPosition} from './dashboard-map-geometry.js';
 
 const make = (tag, text, className) => {
@@ -172,10 +173,10 @@ export function initDashboardFleet() {
             if (marker) {
                 if (shownIds.has(fleetKey(p)) && !map.hasLayer(marker)) marker.addTo(map);
                 if (!shownIds.has(fleetKey(p)) && map.hasLayer(marker)) marker.remove();
-                const appearance = `${color(p)}:${fleetState(p) === 'moving'}:${warnings.get(fleetKey(p)).length > 0}`;
+                const appearance = `${color(p)}:${vehicleIcon(p)}:${fleetState(p) === 'moving'}:${warnings.get(fleetKey(p)).length > 0}`;
                 if (marker.dashboardAppearance !== appearance) {
                     marker.setIcon(L.divIcon({className: `fleet-dashboard-marker${fleetState(p) === 'moving' ? ' is-moving' : ''}${warnings.get(fleetKey(p)).length ? ' has-warning' : ''}`,
-                        iconSize: [32, 32], iconAnchor: [16, 16], html: `<div class="fleet-dashboard-marker-body" style="--vehicle-color:${color(p)}"><i class="fa-solid fa-car-side" aria-hidden="true"></i></div>`}));
+                        iconSize: [32, 32], iconAnchor: [16, 16], html: `<div class="fleet-dashboard-marker-body" style="--vehicle-color:${color(p)}"><i class="fa-solid ${vehicleIcon(p)}" aria-hidden="true"></i></div>`}));
                     marker.dashboardAppearance = appearance;
                 }
                 if (marker.isPopupOpen()) updatePopup(marker, p);

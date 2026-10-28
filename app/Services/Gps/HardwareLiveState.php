@@ -34,7 +34,8 @@ final class HardwareLiveState
             return [...$cached, 'authorization' => $device->status, 'name' => $device->name,
                 'registration' => $device->vehicle?->registration_number,
                 'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
-                'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle')];
+                'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle'),
+                'vehicle_icon' => config('fleet.icons.'.($device->vehicle?->details['icon'] ?? $device->vehicle?->details['type'] ?? 'car').'.icon', 'fa-car-side')];
         }
 
         return $fleet->device($device);
