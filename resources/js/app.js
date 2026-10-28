@@ -25,6 +25,7 @@ try {
 
 document.addEventListener('DOMContentLoaded', () => {
     initHardwareGps();
+    if (document.getElementById('fleet-dashboard')) import('./dashboard-fleet').then(({initDashboardFleet}) => initDashboardFleet());
     if (document.getElementById('hardware-history')) import('./hardware-gps-history').then(({initHardwareGpsHistory}) => initHardwareGpsHistory());
     initThemeCustomizer();
     initNotificationCenter();
@@ -54,6 +55,10 @@ document.addEventListener('DOMContentLoaded', () => {
             lengthChange: false,
             autoWidth: false,
         });
+    });
+
+    document.getElementById('dashboard-information-tab')?.addEventListener('shown.bs.offcanvas', () => {
+        DataTable.tables({visible: true, api: true}).columns.adjust().responsive.recalc();
     });
 
     const alertMessage = document.querySelector('[data-toast-message]');

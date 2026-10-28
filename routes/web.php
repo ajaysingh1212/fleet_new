@@ -16,6 +16,9 @@ Route::get('/dashboard', DashboardController::class)
     ->middleware(['auth', 'verified'])
     ->name('dashboard');
 
+Route::get('/dashboard/fleet', \App\Http\Controllers\DashboardFleetController::class)
+    ->middleware(['auth', 'verified'])->name('dashboard.fleet');
+
 Route::get('/live-map', [LiveMapController::class, 'index'])
     ->middleware(['auth', 'verified'])
     ->name('live-map.index');

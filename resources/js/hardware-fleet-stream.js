@@ -1,7 +1,7 @@
 // One WebSocket connection; subscribe only to the bounded map page. HTTP is
 // used for reconciliation and bounded recovery when delivery goes silent.
 export class HardwareFleetStream {
-    constructor({echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce = 300, recoveryMs = 5000}) {
+    constructor({echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce = 300, recoveryMs = 2000}) {
         Object.assign(this, {echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce});
         this.channels = new Map();
         this.watchedCount = 0;

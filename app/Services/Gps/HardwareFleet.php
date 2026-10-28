@@ -5,6 +5,7 @@ namespace App\Services\Gps;
 use App\Events\HardwareLocationUpdated;
 use App\Models\GpsDevice;
 use App\Models\Vehicle;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 
 final class HardwareFleet
@@ -75,7 +76,14 @@ final class HardwareFleet
     public function device(GpsDevice $device): array
     {
         $presence = app(HardwareConnectionState::class)->snapshot($device->id);
-        $online = $device->status === 'active' && $device->last_packet_at?->gt(now()->subSeconds(config('gps.idle_seconds')))
+        $lastPacket = $device->last_packet_at;
+        if (! empty($presence['connection_last_packet_at'])) {
+            $received = CarbonImmutable::parse($presence['connection_last_packet_at']);
+            if (! $lastPacket || $received->gt($lastPacket)) {
+                $lastPacket = $received;
+            }
+        }
+        $online = $device->status === 'active' && $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')))
             && ($presence['connection_connected'] ?? true);
         $position = $device->latestLocation;
         $heartbeat = $device->latestHeartbeat;
@@ -86,7 +94,7 @@ final class HardwareFleet
         $acc = $heartbeatNewer ? ($telemetry['acc'] ?? $positionAcc) : ($positionAcc ?? $telemetry['acc'] ?? null);
         $accFromHeartbeat = $heartbeatNewer ? isset($telemetry['acc']) : ! isset($positionAcc);
         $accReportedAt = $accFromHeartbeat && $heartbeat
-            ? \Carbon\CarbonImmutable::parse($heartbeat->received_at, 'UTC') : $position?->recorded_at;
+            ? CarbonImmutable::parse($heartbeat->received_at, 'UTC') : $position?->recorded_at;
         $accFresh = $acc !== null && $accReportedAt?->gte(now()->subSeconds(config('gps.idle_seconds')));
         $reportedAcc = $acc;
         // An old ignition report is historical evidence, not current ignition.
@@ -94,7 +102,7 @@ final class HardwareFleet
             $acc = null;
         }
         $fresh = $position && $position->recorded_at->gte(now()->subSeconds(config('gps.fresh_seconds', 15)));
-        $heartbeatFresh = $heartbeat && \Carbon\CarbonImmutable::parse($heartbeat->received_at, 'UTC')
+        $heartbeatFresh = $heartbeat && CarbonImmutable::parse($heartbeat->received_at, 'UTC')
             ->gte(now()->subSeconds(config('gps.idle_seconds')));
         $reportedFix = $heartbeatNewer && $heartbeatFresh ? ($telemetry['gps_positioned_reported'] ?? null) : null;
         $gpsState = ! $position ? 'awaiting_gps' : ($reportedFix === false ? 'no_gps_fix' : (! $fresh ? 'stale_gps' : 'fresh'));
@@ -113,12 +121,15 @@ final class HardwareFleet
             'driver_name' => $device->vehicle?->details['driver_name'] ?? null,
             'authorization' => $device->status, 'online' => $online, 'state' => $state,
             ...$presence,
-            'last_packet_at' => $device->last_packet_at?->toIso8601String(), 'acc' => $acc,
+            'last_packet_at' => $lastPacket?->toIso8601String(), 'acc' => $acc,
             'acc_reported' => $reportedAcc, 'acc_reported_at' => $accReportedAt?->toIso8601String(),
             'acc_source' => $acc === null && $reportedAcc === null ? null : ($accFromHeartbeat ? 'heartbeat' : 'location'),
             'gps_state' => $gpsState, 'observed_at' => now()->utc()->format('Y-m-d\TH:i:s.u\Z'),
-            'gps_reported_at' => $heartbeat ? \Carbon\CarbonImmutable::parse($heartbeat->received_at, 'UTC')->toIso8601String() : null,
+            'gps_reported_at' => $heartbeat ? CarbonImmutable::parse($heartbeat->received_at, 'UTC')->toIso8601String() : null,
+            'heartbeat_sensors' => HardwareSensorData::forDisplay($telemetry ?? []),
+            'heartbeat_reported_at' => $heartbeat ? CarbonImmutable::parse($heartbeat->received_at, 'UTC')->toIso8601String() : null,
             'gps_fresh' => (bool) $fresh && $reportedFix !== false, 'gps_positioned_reported' => $reportedFix,
-            'gps_fresh_seconds' => config('gps.fresh_seconds', 15), 'idle_seconds' => config('gps.idle_seconds')];
+            'gps_fresh_seconds' => config('gps.fresh_seconds', 15), 'idle_seconds' => config('gps.idle_seconds'),
+            'reconnect_seconds' => config('gps.reconnect_seconds', 30)];
     }
 }

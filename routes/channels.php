@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Services\RelationshipAuthorizationService;
 use Illuminate\Support\Facades\Broadcast;
 
+Broadcast::channel('dashboard.fleet.{id}', fn ($user, $id) => (int) $user->id === (int) $id);
+
 Broadcast::channel('admin.gps.hardware', fn ($user) => $user->can('viewAny', GpsDevice::class));
 Broadcast::channel('admin.gps.alerts', fn ($user) => $user->can('viewAny', GpsDevice::class));
 Broadcast::channel('admin.gps.hardware.device.{id}', fn ($user, $id) => $user->can('viewAny', GpsDevice::class)

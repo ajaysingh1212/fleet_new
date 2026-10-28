@@ -1,4 +1,4 @@
-param([int]$Port = 9000, [switch]$Restart)
+param([int]$Port = 9000, [switch]$Restart, [switch]$WorkersOnly, [switch]$KeepReverb)
 
 $ErrorActionPreference = 'Stop'
 $gpsWorkspace = Split-Path -Parent $PSScriptRoot
@@ -46,10 +46,25 @@ function Start-GpsService([string]$Name, [string[]]$Arguments, [int]$ListenPort 
 
 # Dedicated local database queue: no network broadcasts inside the GPS read loop.
 # Production uses Redis ingestion and supervised workers; see GPS-REALTIME.md.
-Start-GpsService 'reverb' @('artisan','reverb:start','--host=127.0.0.1','--port=8080') 8080
-Start-GpsService 'live-worker' @('artisan','queue:work','database','--queue=gps-live','--sleep=0.1','--tries=5','--backoff=3','--timeout=30')
-Start-GpsService 'persistence-worker' @('artisan','queue:work','database','--queue=gps-persist','--sleep=1','--tries=5','--backoff=3','--timeout=30')
-Start-GpsService 'broadcast-worker' @('artisan','queue:work','database','--queue=gps-broadcasts','--sleep=1','--tries=5','--backoff=3','--timeout=30')
-Start-GpsService 'receiver' @('artisan','gps:listen','--host=0.0.0.0',"--port=$Port",'--diagnostic','--persist','--registered','--diagnostic-protocol=pt06','--format=json') $Port
+if (-not $WorkersOnly -and -not $KeepReverb) {
+    Start-GpsService 'reverb' @('artisan','reverb:start','--host=127.0.0.1','--port=8080') 8080
+}
+# Replace the previous fixed workers with one bounded, self-healing pool.
+# Only stop exact processes recorded by this workspace; never match by name.
+foreach ($gpsLegacyName in @('live-worker','persistence-worker','broadcast-worker')) {
+    $gpsLegacyRecord = $gpsServices[$gpsLegacyName]
+    if (-not $gpsLegacyRecord) { continue }
+    $gpsLegacyProcess = Get-Process -Id $gpsLegacyRecord.Id -ErrorAction SilentlyContinue
+    if ($gpsLegacyProcess -and $gpsLegacyProcess.ProcessName -eq 'php' -and $gpsLegacyProcess.StartTime.ToUniversalTime().Ticks.ToString() -eq $gpsLegacyRecord.StartTicks) {
+        Stop-Process -Id $gpsLegacyProcess.Id
+        $gpsLegacyProcess.WaitForExit(10000) | Out-Null
+        if (-not $gpsLegacyProcess.HasExited) { throw "$gpsLegacyName did not stop." }
+    }
+    $gpsServices.Remove($gpsLegacyName)
+}
+Start-GpsService 'worker-supervisor' @('artisan','gps:workers','--max=4','--jobs-per-worker=20','--interval=2')
+if (-not $WorkersOnly) {
+    Start-GpsService 'receiver' @('artisan','gps:listen','--host=0.0.0.0',"--port=$Port",'--diagnostic','--persist','--registered','--diagnostic-protocol=pt06','--format=json') $Port
+}
 $gpsServices | ConvertTo-Json | Set-Content -LiteralPath $gpsStatePath -Encoding UTF8
 Write-Host 'Realtime fleet services started. Logs: storage\logs\gps-{service}.log. Run this script again after a PC restart.'

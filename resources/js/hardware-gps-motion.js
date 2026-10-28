@@ -1,4 +1,5 @@
 // Animate between measured positions without extrapolating a route or location.
+const communicationAt = p => Math.max(Date.parse(p.last_packet_at) || 0, Date.parse(p.connection_last_packet_at) || 0);
 export function mergeFleetUpdate(old, incoming) {
     if (!old || old.vehicle_id !== incoming.vehicle_id) return incoming;
     const p = {...old, ...incoming};
@@ -6,6 +7,7 @@ export function mergeFleetUpdate(old, incoming) {
         || Date.parse(incoming.connection_observed_at) < Date.parse(old.connection_observed_at))) {
         p.connection_connected = old.connection_connected;
         p.connection_observed_at = old.connection_observed_at;
+        p.connection_last_packet_at = old.connection_last_packet_at;
     }
     // A DB snapshot may be generated later while persistence is still behind
     // the live stream. Keep the live telemetry, but accept current metadata.
@@ -15,11 +17,11 @@ export function mergeFleetUpdate(old, incoming) {
         for (const field of ['latitude', 'longitude', 'recorded_at', 'received_at', 'speed', 'heading',
             'last_packet_at', 'acc', 'acc_reported', 'acc_reported_at', 'acc_source',
             'gps_positioned_reported', 'gps_reported_at', 'gps_fresh', 'gps_state',
-            'live_revision', 'live_received_at']) p[field] = old[field];
+            'live_revision', 'live_received_at', 'altitude', 'satellites', 'sensors', 'heartbeat_sensors', 'heartbeat_reported_at']) p[field] = old[field];
     } else if (old.observed_at && incoming.observed_at && incoming.observed_at < old.observed_at
         && !(Date.parse(incoming.live_received_at) > (Date.parse(old.live_received_at ?? old.last_packet_at) || 0))) return old;
     if (Date.parse(incoming.recorded_at) < Date.parse(old.recorded_at)) {
-        for (const field of ['latitude', 'longitude', 'recorded_at', 'received_at', 'speed', 'heading']) p[field] = old[field];
+        for (const field of ['latitude', 'longitude', 'recorded_at', 'received_at', 'speed', 'heading', 'altitude', 'satellites', 'sensors']) p[field] = old[field];
     }
     if (Date.parse(incoming.acc_reported_at) < Date.parse(old.acc_reported_at)) {
         for (const field of ['acc', 'acc_reported', 'acc_reported_at', 'acc_source']) p[field] = old[field];
@@ -38,8 +40,8 @@ export function fleetState(p, now = Date.now()) {
     if (p.state === 'unassigned') return 'unassigned';
     const threshold = (p.idle_seconds ?? 180) * 1000;
     const gpsThreshold = (p.gps_fresh_seconds ?? 15) * 1000;
-    const communication = Date.parse(p.last_packet_at);
-    if (p.connection_connected === false || !Number.isFinite(communication) || now - communication > threshold) return 'offline';
+    const communication = communicationAt(p);
+    if (p.connection_connected === false || !communication || now - communication > threshold) return 'offline';
     const fix = Date.parse(p.recorded_at);
     const accTime = Date.parse(p.acc_reported_at ?? p.recorded_at);
     const acc = Number.isFinite(accTime) && now - accTime <= threshold ? (p.acc_reported ?? p.acc) : null;
@@ -60,10 +62,13 @@ export function fleetPresentation(p, now = Date.now()) {
     const threshold = (p.idle_seconds ?? 180)*1000;
     const gpsThreshold = (p.gps_fresh_seconds ?? 15)*1000;
     const age = now - Date.parse(p.recorded_at);
+    const communication = communicationAt(p);
+    const reconnecting = p.connection_connected === false && p.reconnect_seconds > 0 && communication > 0
+        && now - communication <= p.reconnect_seconds * 1000;
     const connection = p.authorization && p.authorization !== 'active' ? p.authorization
         : p.state === 'unassigned' ? 'Unassigned'
-        : p.connection_connected !== false && Number.isFinite(Date.parse(p.last_packet_at)) && now - Date.parse(p.last_packet_at) <= threshold
-            ? 'Online' : 'Offline';
+        : reconnecting ? 'Reconnecting'
+        : p.connection_connected !== false && communication > 0 && now - communication <= threshold ? 'Online' : 'Offline';
     const fresh = Number.isFinite(age) && age <= gpsThreshold && p.gps_positioned_reported !== false;
     const moving = p.speed != null && p.speed > 1.8;
     const state = fleetState(p, now);

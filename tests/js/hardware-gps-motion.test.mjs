@@ -106,3 +106,16 @@ test('a late HTTP snapshot cannot erase or rewind a not-yet-persisted live posit
     assert.equal(mergeFleetUpdate(live, {...db, latitude: null, longitude: null, recorded_at: null, last_packet_at: null}).latitude, 26);
     assert.equal(mergeFleetUpdate(live, {...db, vehicle_id: 4}).latitude, 24);
 });
+
+test('receiver activity stays online while queued storage is behind and brief peer closes say reconnecting', () => {
+    const now = Date.parse('2026-10-28T09:00:00Z');
+    const p = {authorization: 'active', last_packet_at: new Date(now - 600000).toISOString(),
+        connection_last_packet_at: new Date(now).toISOString(), connection_connected: true,
+        reconnect_seconds: 30, recorded_at: new Date(now - 5000).toISOString(), speed: 21, acc: true};
+    assert.equal(fleetPresentation(p, now).connection, 'Online');
+    assert.equal(fleetState(p, now), 'moving');
+    assert.equal(fleetPresentation({...p, connection_connected: false}, now + 10000).connection, 'Reconnecting');
+    assert.equal(fleetState({...p, connection_connected: false}, now + 10000), 'offline');
+    assert.equal(fleetPresentation({...p, connection_connected: false}, now + 31000).connection, 'Offline');
+    assert.equal(fleetPresentation({...p, connection_connected: false, authorization: 'blocked'}, now).connection, 'blocked');
+});

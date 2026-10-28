@@ -5,6 +5,7 @@ namespace App\Events;
 use App\Models\GpsDevice;
 use App\Models\GpsDeviceLocation;
 use App\Services\Gps\HardwareFleet;
+use App\Services\Gps\HardwareSensorData;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -22,7 +23,10 @@ class HardwareLocationUpdated implements ShouldBroadcast
 
     public function broadcastOn(): array
     {
-        return [new PrivateChannel('admin.gps.hardware.device.'.(int) $this->location['device_id'])];
+        $owner = GpsDevice::with('vehicle')->find($this->location['device_id'])?->vehicle?->owner_user_id;
+
+        return [new PrivateChannel('admin.gps.hardware.device.'.(int) $this->location['device_id']),
+            ...($owner ? [new PrivateChannel('dashboard.fleet.'.(int) $owner)] : [])];
     }
 
     public function broadcastAs(): string
@@ -55,6 +59,8 @@ class HardwareLocationUpdated implements ShouldBroadcast
             'acc_reported_at' => $location->recorded_at->toIso8601String(), 'acc_source' => 'location',
             'last_packet_at' => $device->last_packet_at?->toIso8601String(), 'idle_seconds' => config('gps.idle_seconds'),
             'latitude' => $location->latitude,
+            'altitude' => $location->altitude, 'satellites' => $location->satellites,
+            'sensors' => HardwareSensorData::forDisplay($location->telemetry ?? []),
             'longitude' => $location->longitude, 'speed' => $location->speed, 'heading' => $location->heading,
             'recorded_at' => $location->recorded_at->toIso8601String(), 'received_at' => $location->received_at->toIso8601String(),
             'protocol' => $location->protocol, 'model' => $device->model];

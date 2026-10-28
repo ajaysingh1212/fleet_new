@@ -10,11 +10,16 @@ use App\Services\Gps\Gateway\Connection;
 use App\Services\Gps\Gateway\Location;
 use App\Services\Gps\Gateway\Packet;
 use App\Services\Gps\HardwareFleet;
+use App\Services\Gps\HardwareLiveState;
 use App\Services\Gps\LocalHardwareRecorder;
 use Carbon\CarbonImmutable;
+use Illuminate\Broadcasting\BroadcastManager;
+use Illuminate\Broadcasting\UniqueBroadcastEvent;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -50,13 +55,15 @@ class HardwareGpsLiveFirstTest extends TestCase
     {
         $c = new Connection('127.0.0.1');
         $location = new Location($latitude, 85.1, $time ?? CarbonImmutable::now('UTC'), 0, 0, gpsFix: true, telemetry: ['acc' => false]);
+
         return new ProcessHardwarePacket($device->id, $device->identifier, $c->id, $c->connectedAt, $c->peer,
             'pt06', '2022.4.27-v2', 'location', hash('sha256', $hash), [$location->toArray()], [], now()->utc()->format('Y-m-d H:i:s'), null);
     }
 
     public function test_receiver_queues_durable_input_without_writing_gps_history(): void
     {
-        $device = $this->device(); $c = new Connection('127.0.0.1');
+        $device = $this->device();
+        $c = new Connection('127.0.0.1');
         app(LocalHardwareRecorder::class)->record(new Packet('heartbeat', null, '2022.4.27-v2', events: ['acc' => false]),
             'realistic-heartbeat-fixture', $device->identifier, 'pt06', $c->id, $c->connectedAt, $c->peer);
         Queue::assertPushed(DeliverHardwarePacket::class, fn ($job, $queue) => $queue === 'gps-live');
@@ -89,7 +96,8 @@ class HardwareGpsLiveFirstTest extends TestCase
     {
         $device = $this->device();
         app()->call([new DeliverHardwarePacket($this->packet($device, 'new', 26), 'database'), 'handle']);
-        DB::enableQueryLog(); DB::flushQueryLog();
+        DB::enableQueryLog();
+        DB::flushQueryLog();
         app()->call([new DeliverHardwarePacket($this->packet($device, 'old', 24, CarbonImmutable::now('UTC')->subMinute()), 'database'), 'handle']);
         foreach (DB::getQueryLog() as $query) {
             $this->assertStringNotContainsString('gps_device_locations', $query['query']);
@@ -102,7 +110,8 @@ class HardwareGpsLiveFirstTest extends TestCase
 
     public function test_revocation_before_delivery_blocks_live_publication_and_storage(): void
     {
-        $device = $this->device(); $job = new DeliverHardwarePacket($this->packet($device, 'revoked'), 'database');
+        $device = $this->device();
+        $job = new DeliverHardwarePacket($this->packet($device, 'revoked'), 'database');
         $device->forceFill(['status' => 'blocked'])->saveQuietly();
         app()->call([$job, 'handle']);
         Event::assertNotDispatched(HardwarePacketLive::class);
@@ -133,9 +142,9 @@ class HardwareGpsLiveFirstTest extends TestCase
     public function test_broadcast_failure_does_not_block_history_queue(): void
     {
         // Use an explicit throwing dispatcher to simulate a failed live transport.
-        $dispatcher = \Mockery::mock(\Illuminate\Contracts\Events\Dispatcher::class);
+        $dispatcher = \Mockery::mock(Dispatcher::class);
         $dispatcher->shouldReceive('dispatch')->with(\Mockery::type(HardwarePacketLive::class))->andThrow(new \RuntimeException('transport down'));
-        \Illuminate\Support\Facades\Log::shouldReceive('warning')->once()->with('gps_live_broadcast_failed', ['device_id' => 1]);
+        Log::shouldReceive('warning')->once()->with('gps_live_broadcast_failed', ['device_id' => 1]);
         $device = $this->device();
         $job = new DeliverHardwarePacket($this->packet($device, 'offline-browser'), 'database');
         $this->app->instance('events', $dispatcher);
@@ -148,7 +157,7 @@ class HardwareGpsLiveFirstTest extends TestCase
     {
         $device = $this->device();
         config(['gps.live_cache_store' => 'unavailable-live-cache']);
-        \Illuminate\Support\Facades\Log::shouldReceive('warning')->once();
+        Log::shouldReceive('warning')->once();
         app()->call([new DeliverHardwarePacket($this->packet($device, 'cache-failure'), 'database'), 'handle']);
         Queue::assertPushed(ProcessHardwarePacket::class);
         Event::assertNotDispatched(HardwarePacketLive::class);
@@ -166,5 +175,36 @@ class HardwareGpsLiveFirstTest extends TestCase
         Queue::shouldReceive('connection')->with('database')->once()->andReturn($queue);
         $this->expectExceptionMessage('history_queue_unavailable');
         app()->call([new DeliverHardwarePacket($this->packet($device, 'retry-history'), 'database'), 'handle']);
+    }
+
+    public function test_broadcasts_are_coalesced_on_their_own_queue_and_read_the_latest_fix(): void
+    {
+        $device = $this->device();
+        $live = app(HardwareLiveState::class);
+        $fleet = app(HardwareFleet::class);
+        $first = $this->packet($device, 'broadcast-first');
+        $old = $live->project($live->baseline($device, $fleet), $first, now()->utc()->toIso8601String());
+        $event = new HardwarePacketLive($old);
+        $manager = app(BroadcastManager::class);
+        $manager->queue($event);
+        $this->travel(2)->seconds();
+        $next = $this->packet($device, 'broadcast-next', 26);
+        $latest = $live->project($live->baseline($device, $fleet), $next, now()->utc()->format('Y-m-d\TH:i:s.u\Z'));
+        $manager->queue(new HardwarePacketLive($latest));
+        Queue::assertPushed(UniqueBroadcastEvent::class, 1);
+        Queue::assertPushed(UniqueBroadcastEvent::class,
+            fn ($job, $queue) => $queue === 'gps-broadcasts');
+        $event->broadcastOn();
+        $this->assertSame(26.0, $event->broadcastWith()['latitude']);
+        $this->assertSame(0, $event->broadcastWith()['queue_delay_ms']);
+        $device->update(['status' => 'blocked']);
+        $this->assertSame([], (new HardwarePacketLive($latest))->broadcastOn());
+    }
+
+    public function test_worker_demand_can_be_inspected_without_launching_processes(): void
+    {
+        config(['gps.broadcast_connection' => 'database']);
+        $this->artisan('gps:workers', ['--once' => true])->assertSuccessful();
+        $this->artisan('gps:workers', ['--once' => true, '--max' => 100])->assertFailed();
     }
 }

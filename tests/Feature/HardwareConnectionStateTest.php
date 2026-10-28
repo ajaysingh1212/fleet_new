@@ -7,6 +7,7 @@ use App\Jobs\ProcessHardwarePacket;
 use App\Models\GpsDevice;
 use App\Services\Gps\HardwareConnectionState;
 use App\Services\Gps\HardwareFleet;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -77,5 +78,20 @@ class HardwareConnectionStateTest extends TestCase
         $this->assertFalse(app(HardwareFleet::class)->snapshot()[0]['online']);
         $this->assertCount(0, app(HardwareFleet::class)->page(['status' => 'online'])['devices']);
         $this->assertCount(1, app(HardwareFleet::class)->page(['status' => 'offline'])['devices']);
+    }
+
+    public function test_receiver_packets_keep_presence_online_even_while_history_and_live_jobs_are_waiting(): void
+    {
+        $device = $this->device();
+        $device->update(['last_packet_at' => now()->subMinutes(10)]);
+        app(HardwareConnectionState::class)->touch($device->id, 'receiving-now');
+        $this->assertTrue($device->fresh()->is_online);
+        $state = app(HardwareFleet::class)->snapshot()[0];
+        $this->assertTrue($state['online']);
+        $this->assertTrue($state['connection_connected']);
+        $this->assertNotEmpty($state['connection_last_packet_at']);
+        $this->assertTrue(CarbonImmutable::parse($state['last_packet_at'])->gte(now()->subSecond()));
+        app(HardwareConnectionState::class)->close($device->id, 'receiving-now');
+        $this->assertFalse($device->fresh()->is_online);
     }
 }

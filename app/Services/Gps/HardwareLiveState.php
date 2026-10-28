@@ -56,17 +56,25 @@ final class HardwareLiveState
             $state = $this->overlay($base);
             $incoming = ['last_packet_at' => $receivedAt, 'live_received_at' => $receivedAt];
             foreach ($packet->locations as $location) {
-                if (! $location['gps_fix']) continue;
+                if (! $location['gps_fix']) {
+                    continue;
+                }
                 $time = CarbonImmutable::parse($location['recorded_at'], 'UTC')->toIso8601String();
-                if (! empty($incoming['recorded_at']) && $incoming['recorded_at'] >= $time) continue;
+                if (! empty($incoming['recorded_at']) && $incoming['recorded_at'] >= $time) {
+                    continue;
+                }
                 $incoming = [...$incoming, 'recorded_at' => $time, 'received_at' => $receivedAt,
                     'latitude' => $location['latitude'], 'longitude' => $location['longitude'],
-                    'speed' => $location['speed'], 'heading' => $location['heading']];
+                    'speed' => $location['speed'], 'heading' => $location['heading'],
+                    'altitude' => $location['altitude'] ?? null, 'satellites' => $location['satellites'] ?? null,
+                    'sensors' => HardwareSensorData::forDisplay($location['telemetry'] ?? [])];
                 if (isset($location['telemetry']['acc'])) {
                     $incoming = [...$incoming, 'acc_reported' => $location['telemetry']['acc'], 'acc_reported_at' => $time, 'acc_source' => 'location'];
                 }
             }
             if ($packet->type === 'heartbeat') {
+                $incoming['heartbeat_sensors'] = HardwareSensorData::forDisplay($packet->events);
+                $incoming['heartbeat_reported_at'] = $receivedAt;
                 if (isset($packet->events['acc'])) {
                     $incoming = [...$incoming, 'acc_reported' => $packet->events['acc'], 'acc_reported_at' => $receivedAt, 'acc_source' => 'heartbeat'];
                 }
@@ -75,6 +83,10 @@ final class HardwareLiveState
                 }
             }
             $state = $this->merge($state, $incoming);
+            if ($this->time($receivedAt) >= $this->time($state['live_received_at'] ?? null)) {
+                $state['projected_at'] = now()->utc()->format('Y-m-d\TH:i:s.u\Z');
+                $state['queue_delay_ms'] = max(0, (int) round(((float) now()->format('U.u') - $this->time($receivedAt)) * 1000));
+            }
             $state['live_revision'] = ($state['live_revision'] ?? 0) + 1;
             $state = $this->classify($state);
             $this->store()->put($this->key($packet->deviceId), $state, now()->addDay());
@@ -97,12 +109,17 @@ final class HardwareLiveState
     private function merge(array $base, array $incoming): array
     {
         foreach ([['last_packet_at', ['last_packet_at']],
-            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at']],
+            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude', 'satellites', 'sensors']],
+            ['heartbeat_reported_at', ['heartbeat_sensors', 'heartbeat_reported_at']],
             ['acc_reported_at', ['acc_reported', 'acc_reported_at', 'acc_source']],
             ['gps_reported_at', ['gps_positioned_reported', 'gps_reported_at']],
-            ['live_received_at', ['live_received_at', 'live_revision']]] as [$clock, $fields]) {
+            ['live_received_at', ['live_received_at', 'live_revision', 'projected_at', 'queue_delay_ms']]] as [$clock, $fields]) {
             if (! empty($incoming[$clock]) && $this->time($incoming[$clock]) >= $this->time($base[$clock] ?? null)) {
-                foreach ($fields as $field) if (array_key_exists($field, $incoming)) $base[$field] = $incoming[$field];
+                foreach ($fields as $field) {
+                    if (array_key_exists($field, $incoming)) {
+                        $base[$field] = $incoming[$field];
+                    }
+                }
             }
         }
 
@@ -113,11 +130,19 @@ final class HardwareLiveState
     {
         $cutoff = (float) now()->subSeconds(config('gps.idle_seconds'))->format('U.u');
         $p = [...$p, ...app(HardwareConnectionState::class)->snapshot($p['device_id'])];
+        if ($this->time($p['connection_last_packet_at'] ?? null) > $this->time($p['last_packet_at'] ?? null)) {
+            $p['last_packet_at'] = $p['connection_last_packet_at'];
+        }
+        $p['reconnect_seconds'] = config('gps.reconnect_seconds', 30);
         $p['online'] = $p['authorization'] === 'active' && $this->time($p['last_packet_at'] ?? null) >= $cutoff
             && ($p['connection_connected'] ?? true);
         $p['acc'] = $this->time($p['acc_reported_at'] ?? null) >= $cutoff ? ($p['acc_reported'] ?? null) : null;
-        if (isset($p['gps_reported_at']) && $this->time($p['gps_reported_at']) < $cutoff) $p['gps_positioned_reported'] = null;
-        if ($this->time($p['gps_reported_at'] ?? null) < $this->time($p['recorded_at'] ?? null)) $p['gps_positioned_reported'] = null;
+        if (isset($p['gps_reported_at']) && $this->time($p['gps_reported_at']) < $cutoff) {
+            $p['gps_positioned_reported'] = null;
+        }
+        if ($this->time($p['gps_reported_at'] ?? null) < $this->time($p['recorded_at'] ?? null)) {
+            $p['gps_positioned_reported'] = null;
+        }
         $p['gps_fresh_seconds'] = config('gps.fresh_seconds', 15);
         $fresh = ! empty($p['recorded_at']) && $this->time($p['recorded_at']) >= (float) now()->subSeconds($p['gps_fresh_seconds'])->format('U.u');
         $p['gps_state'] = empty($p['recorded_at']) ? 'awaiting_gps' : (($p['gps_positioned_reported'] ?? null) === false ? 'no_gps_fix' : ($fresh ? 'fresh' : 'stale_gps'));

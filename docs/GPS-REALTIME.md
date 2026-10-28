@@ -1,7 +1,7 @@
 # Realtime fleet map
 
 The map uses WebSockets for immediate updates and reconciles its bounded page
-every five seconds to recover dropped broadcasts even while the socket remains
+every two seconds to recover dropped broadcasts even while the socket remains
 connected. Reconciliation never overlaps an in-flight request, retains newer
 live telemetry, and stops when the page is disposed. It also works when Echo
 is unavailable. Initial HTML contains
@@ -22,10 +22,12 @@ The default live-first path is:
 1. Decode and authorize the packet, then durably enqueue its normalized input
    before sending the tracker ACK. This is an input journal, not a GPS history write.
 2. The live worker rechecks the registration, updates a small current-state cache
-   and publishes the decoded payload directly through Reverb. Warm live updates
+   and schedules a separate, per-device unique broadcast on `gps-broadcasts`.
+   Broadcast delivery reads the latest authorized cache state, coalescing obsolete
+   queued updates. Slow Reverb requests cannot block position projection. Warm live updates
    do not read location/history tables. The initial cache seed may read the last
    stored state; administrative authorization is still checked in SQL.
-3. After the publish attempt, enqueue the original packet on `gps-persist`.
+3. After scheduling the broadcast, enqueue the original packet on `gps-persist`.
    A separate worker writes deduplicated location/event history and does not
    broadcast it again. Browser rendering is never a storage prerequisite.
 
@@ -139,3 +141,40 @@ of the 180-second communication timeout. A 139-second-old location is Delayed,
 not Fresh, even while heartbeat traffic keeps the device Online. The popup shows
 location receipt time and GPS age on arrival to distinguish upstream backlog
 from browser delivery. Freshness labels update once a second locally.
+
+## Adaptive local workers and connection diagnostics
+
+`tools/start-gps-realtime.ps1` now starts `php artisan gps:workers` instead of
+three fixed workers. Each queue keeps one warm worker; the supervisor checks
+backlog every two seconds and adds up to four workers per queue (twenty queued
+jobs per worker, or a second worker if more than one job has waited two seconds).
+Burst workers stop when empty. Normal workers retire between jobs after five
+minutes or 500 jobs and are replaced. History remains deduplicated; per-device
+live-cache clocks and locks reject out-of-order updates. No extra GPS fixes or
+remote device commands are created by autoscaling.
+
+Use `php artisan gps:workers --once` to inspect demand without spawning processes.
+`php tools/gps-runtime-status.php <IMEI>` reports queue age, failed GPS job count,
+receiver state, processing delay, and worker pool status without credentials.
+The running pool status is in `storage/framework/gps-workers-status.json`.
+Use `tools/start-gps-realtime.ps1 -Restart -KeepReverb` to reload receiver/workers
+without interrupting the shared WebSocket server. `-WorkersOnly -Restart` keeps
+the TCP receiver running as well.
+
+Receiver presence records authenticated receive time separately from queued
+history, so a persistence backlog cannot make an active receiver look offline.
+A confirmed closed socket still has `online=false`. Its display says
+`Reconnecting` for 30 seconds after the last authenticated receive, then
+`Offline`; TCP state remains visible separately. Freshness is based on device
+GPS time, never on job completion time. `Device delivery delay` and
+`Server queue delay` distinguish cellular/device buffering from server backlog.
+TCP listeners enable `tcp_nodelay`, and ACKs are sent in the same read-loop pass.
+
+Observed on 28 October 2026 for the reported tracker: no queued or failed GPS
+jobs, live jobs around 12–30 ms, repeated `peer_closed`, and retransmitted GPS
+fixes several minutes older than receipt. This is evidence of device/upstream
+buffering and connection loss, not evidence of a queue backlog. Backend changes
+cannot recreate GPS fixes that have not reached the receiver.
+
+References: [Laravel workers and job timeouts](https://laravel.com/docs/12.x/queues),
+[PHP TCP stream context options](https://www.php.net/manual/en/context.socket.php).

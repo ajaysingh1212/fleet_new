@@ -74,7 +74,8 @@ class ListenGpsGateway extends Command
             return self::FAILURE;
         }
         $address = 'tcp://'.(str_contains($host, ':') ? '['.$host.']' : $host).':'.$port;
-        $server = @stream_socket_server($address, $errno, $error);
+        $context = stream_context_create(['socket' => ['tcp_nodelay' => true]]);
+        $server = @stream_socket_server($address, $errno, $error, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
         if (! $server) {
             $this->error('Could not bind gateway: '.$error);
 
@@ -179,7 +180,13 @@ class ListenGpsGateway extends Command
                         $close($id);
                     }
                 }
-                foreach ($write as $socket) {
+                // Send newly queued ACKs in this pass, rather than waiting for
+                // the next select timeout just because they were not pending before read.
+                foreach ($clients as $client) {
+                    if ($client['out'] === '') {
+                        continue;
+                    }
+                    $socket = $client['socket'];
                     $id = (int) $socket;
                     if (! isset($clients[$id])) {
                         continue;

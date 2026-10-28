@@ -42,7 +42,7 @@ class HardwareRegistrationService
                 $new = $data['new_vehicle'];
                 $new['details'] = collect($new['details'] ?? [])->only(array_map(fn ($key) => substr($key, 8), array_keys(VehicleRequest::detailRules())))->all();
                 $vehicle = Vehicle::create(['registration_number' => $new['registration_number'], 'name' => $new['name'],
-                    'status' => $new['status'] ?? 'active', 'details' => $new['details'] ?? []]);
+                    'status' => $new['status'] ?? 'active', 'details' => $new['details'] ?? [], 'owner_user_id' => $new['owner_user_id'] ?? null]);
                 $vehicleId = $vehicle->id;
             }
             if ($vehicleId) {

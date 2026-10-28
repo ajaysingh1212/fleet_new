@@ -17,6 +17,7 @@ return [
     'max_frame' => 16384,
     'idle_seconds' => 180,
     'fresh_seconds' => (int) env('GPS_FRESH_SECONDS', 15),
+    'reconnect_seconds' => (int) env('GPS_RECONNECT_SECONDS', 30),
     'pt06_location_ack' => (bool) env('GPS_PT06_LOCATION_ACK', true),
     'map_limit' => 250,
     'local_broadcast' => (bool) env('GPS_LOCAL_BROADCAST', true),

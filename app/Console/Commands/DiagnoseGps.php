@@ -10,6 +10,7 @@ use App\Services\Gps\Gateway\Gt06DiagnosticFrames;
 use App\Services\Gps\Gateway\Protocols\Gt06;
 use App\Services\Gps\Gateway\Protocols\Pt06;
 use App\Services\Gps\Gateway\TcpListenerLease;
+use App\Services\Gps\HardwareConnectionState;
 use App\Services\Gps\LocalHardwareRecorder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -49,7 +50,8 @@ class DiagnoseGps extends Command
             return self::FAILURE;
         }
         $address = 'tcp://'.(str_contains($host, ':') ? '['.$host.']' : $host).':'.$port;
-        $server = @stream_socket_server($address, $errno, $error);
+        $context = stream_context_create(['socket' => ['tcp_nodelay' => true]]);
+        $server = @stream_socket_server($address, $errno, $error, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
         if (! $server) {
             $this->error('Cannot bind '.$address.': '.$error.' Stop the other port-9000 listener first.');
 
@@ -81,7 +83,9 @@ class DiagnoseGps extends Command
             if ($this->option('persist')) {
                 try {
                     $presenceDeviceId = $clients[$id]['imei'] ? DB::table('gps_devices')->where('identifier', $clients[$id]['imei'])->value('id') : null;
-                    if ($presenceDeviceId) app(\App\Services\Gps\HardwareConnectionState::class)->close($presenceDeviceId, $clients[$id]['session_id']);
+                    if ($presenceDeviceId) {
+                        app(HardwareConnectionState::class)->close($presenceDeviceId, $clients[$id]['session_id']);
+                    }
                     if (config('gps.live_first')) {
                         $deviceId = $clients[$id]['imei'] ? DB::table('gps_devices')->where('identifier', $clients[$id]['imei'])->value('id') : null;
                         if ($deviceId) {
@@ -265,7 +269,9 @@ class DiagnoseGps extends Command
                 // sockets are nonblocking; partial writes stay queued for the
                 // next select pass instead of adding a one-second idle wait.
                 foreach ($clients as $client) {
-                    if ($client['out'] === '') continue;
+                    if ($client['out'] === '') {
+                        continue;
+                    }
                     $socket = $client['socket'];
                     $id = (int) $socket;
                     if (! isset($clients[$id])) {

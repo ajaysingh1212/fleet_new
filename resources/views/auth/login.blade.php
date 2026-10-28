@@ -1,723 +1,866 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Last Key</title>
-<meta name="csrf-token" content="{{ csrf_token() }}">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root{
-    /* ===== PRIMARY COLORS — customize here ===== */
-    --void:#07080a;
-    --wall:#0f1114;
-    --wall-warm:#181510;
-    --metal-1:#26282e;
-    --metal-2:#3d4148;
-    --metal-hi:#6a6f78;
-    --bronze:#8a6a3e;
-    --bronze-bright:#d1a35c;
-    --cyan:#33d9e8;
-    --cyan-soft:rgba(51,217,232,0.28);
-    --danger:#c23b2e;
-    --danger-soft:rgba(194,59,46,0.3);
-    --gold:#f0d99a;
-    --gold-soft:rgba(240,217,154,0.4);
-    --text-primary:#e7e6e2;
-    --text-muted:#888c94;
-    --charge:0;
-    /* ===== ANIMATION SPEED — customize here ===== */
-    --ease:cubic-bezier(.4,0,.2,1);
-    --ring-outer-speed:90s;
-    --ring-mid-speed:70s;
-    --ring-inner-speed:50s;
-  }
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ config('app.name', 'Eemotrack Fleet') }}</title>
 
-  *{box-sizing:border-box;}
-  html,body{height:100%;}
-  body{
-    margin:0;
-    min-height:100vh;
-    overflow:hidden;
-    background:#000;
-    font-family:'Inter',system-ui,sans-serif;
-    color:var(--text-primary);
-    cursor:default;
-  }
+    @verbatim
+    <style>
+        /* ===== Page reset ===== */
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+        body { font-family: ui-sans-serif, system-ui, sans-serif; color: #cfefff; }
 
-  .cursor-trail{
-    position:fixed; top:0; left:0;
-    width:22px;height:22px; margin:-11px 0 0 -11px;
-    border-radius:50%;
-    background:radial-gradient(circle, var(--cyan) 0%, transparent 70%);
-    opacity:.5; pointer-events:none; z-index:999;
-    transition:opacity .2s var(--ease), width .2s var(--ease), height .2s var(--ease), margin .2s var(--ease);
-  }
-  .cursor-trail.is-active{width:40px;height:40px;margin:-20px 0 0 -20px;opacity:.8;}
+        /* ===== Globe section (full screen) ===== */
+        .globe-section { position: fixed; inset: 0; background: radial-gradient(ellipse at center, #04101f 0%, #01040a 55%, #000 100%); }
+        #globe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+        #globe.dragging { cursor: grabbing; }
 
-  .flash-black{
-    position:fixed; inset:0; background:#000; opacity:0;
-    pointer-events:none; z-index:900; transition:opacity .12s linear;
-  }
-  .flash-black.is-flashing{opacity:1; transition:opacity .05s linear;}
+        /* Halka neela ambient glow (screen blend) */
+        .ambient { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen;
+            background: radial-gradient(circle at 50% 50%, rgba(20, 90, 170, .22) 0%, rgba(8, 40, 90, .10) 38%, transparent 65%); }
 
-  .flash-red{
-    position:fixed; inset:0; z-index:850; pointer-events:none;
-    background:radial-gradient(circle at 50% 45%, var(--danger-soft), transparent 65%);
-    opacity:0; transition:opacity .3s var(--ease);
-  }
-  .flash-red.is-visible{opacity:1;}
+        /* Kinaron par vignette */
+        .vignette { position: absolute; inset: 0; pointer-events: none;
+            background: radial-gradient(ellipse at center, transparent 48%, rgba(0, 0, 0, .55) 80%, #000 100%); }
 
-  .scene{position:relative; width:100%; height:100vh; display:flex; align-items:center; justify-content:center; perspective:1000px;}
-  .layer{position:absolute; inset:0; pointer-events:none;}
+        /* ===== Fleet landing-page UI ===== */
+        .topbar {
+            position: absolute; z-index: 10; top: 26px; left: 32px; right: 32px;
+            display: flex; align-items: center; justify-content: space-between; gap: 20px;
+            pointer-events: none;
+        }
+        .brand { display:flex; align-items:center; gap:12px; pointer-events:auto; }
+        .brand-mark {
+            width:42px;height:42px;border:1px solid rgba(87,225,255,.6);border-radius:14px;
+            display:grid;place-items:center;color:#8af3ff;font-size:20px;
+            background:linear-gradient(145deg,rgba(26,169,211,.25),rgba(4,18,36,.7));
+            box-shadow:0 0 28px rgba(0,199,255,.15),inset 0 0 18px rgba(0,210,255,.1);
+        }
+        .brand-name { color:#f0fbff;font-size:15px;font-weight:800;letter-spacing:.16em; }
+        .brand-sub { margin-top:4px;color:#70a8bd;font-size:9px;letter-spacing:.22em;text-transform:uppercase; }
+        .top-actions { display:flex;align-items:center;gap:12px;pointer-events:auto; }
+        .system-pill { display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid rgba(100,204,233,.18);
+            border-radius:99px;background:rgba(5,20,37,.55);backdrop-filter:blur(14px);color:#9bc9d9;font-size:11px;letter-spacing:.08em; }
+        .live-dot { width:7px;height:7px;border-radius:50%;background:#5bffc2;box-shadow:0 0 12px #5bffc2;animation:livePulse 1.8s infinite; }
+        .login-btn {
+            position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:11px;
+            padding:13px 19px;border:1px solid rgba(96,232,255,.68);border-radius:14px;
+            color:#effcff;text-decoration:none;font-size:12px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+            background:linear-gradient(120deg,rgba(12,113,151,.48),rgba(8,27,50,.82));
+            box-shadow:0 0 26px rgba(0,190,255,.16),inset 0 0 18px rgba(76,220,255,.07);
+            transition:transform .25s,border-color .25s,box-shadow .25s;backdrop-filter:blur(16px);
+        }
+        .login-btn::before { content:"";position:absolute;top:-80%;left:-45%;width:35%;height:260%;transform:rotate(25deg);
+            background:rgba(255,255,255,.22);filter:blur(8px);transition:left .6s; }
+        .login-btn:hover { transform:translateY(-2px);border-color:#b4f8ff;box-shadow:0 0 35px rgba(0,205,255,.32),inset 0 0 22px rgba(76,220,255,.13); }
+        .login-btn:hover::before { left:130%; }
+        .login-arrow { font-size:18px;color:#80f1ff;transition:transform .25s; }
+        .login-btn:hover .login-arrow { transform:translateX(3px); }
+        .hero-copy { position:absolute;z-index:5;left:clamp(24px,7vw,112px);top:50%;transform:translateY(-46%);max-width:410px;pointer-events:none; }
+        .eyebrow { display:flex;align-items:center;gap:10px;color:#70dff4;font-size:10px;letter-spacing:.25em;text-transform:uppercase;font-weight:700; }
+        .eyebrow::before { content:"";width:26px;height:1px;background:#55d9f4;box-shadow:0 0 10px #55d9f4; }
+        .hero-copy h1 { margin:20px 0 16px;color:#f2fbff;font-size:clamp(38px,5.2vw,70px);line-height:.98;letter-spacing:-.055em;font-weight:750;text-shadow:0 4px 35px rgba(0,0,0,.55); }
+        .hero-copy h1 span { color:#67e5ff;text-shadow:0 0 32px rgba(49,207,255,.32); }
+        .hero-copy p { max-width:340px;margin:0;color:#8eafc3;font-size:14px;line-height:1.8; }
+        .hero-line { margin-top:25px;display:flex;align-items:center;gap:12px;color:#8caebe;font-size:10px;letter-spacing:.14em;text-transform:uppercase; }
+        .hero-line .line { width:45px;height:1px;background:linear-gradient(90deg,#4de3ff,transparent); }
+        .hud-card { position:absolute;z-index:4;min-width:158px;padding:14px 16px;border:1px solid rgba(95,210,238,.18);border-radius:15px;
+            background:linear-gradient(135deg,rgba(7,27,47,.82),rgba(3,13,27,.58));backdrop-filter:blur(16px);
+            box-shadow:0 12px 40px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.025);pointer-events:none; }
+        .hud-label { color:#719db1;font-size:9px;letter-spacing:.17em;text-transform:uppercase; }
+        .hud-value { margin-top:8px;color:#e8faff;font-size:23px;font-weight:750;letter-spacing:-.04em; }
+        .hud-value small { margin-left:5px;color:#6af0c2;font-size:10px;letter-spacing:0; }
+        .hud-note { margin-top:5px;color:#62879b;font-size:10px; }
+        .hud-one { right:7.5%;top:26%;animation:floatCard 6s ease-in-out infinite; }
+        .hud-two { right:5.5%;bottom:24%;animation:floatCard 7s ease-in-out -2s infinite; }
+        .hud-three { left:5%;bottom:9%;min-width:210px;animation:floatCard 8s ease-in-out -1s infinite; }
+        .mini-bars { display:flex;align-items:flex-end;gap:4px;height:23px;margin-top:10px; }
+        .mini-bars i { width:5px;border-radius:4px;background:linear-gradient(#61efff,#168db9);opacity:.8;animation:barPulse 1.2s ease-in-out infinite alternate; }
+        .mini-bars i:nth-child(3n) { animation-delay:-.5s; }
+        .fleet-marker { position:absolute;z-index:3;pointer-events:none;display:flex;align-items:center;gap:7px;color:#baf8ff;font-size:9px;letter-spacing:.1em;text-transform:uppercase; }
+        .fleet-marker .vehicle { width:29px;height:29px;border:1px solid rgba(99,235,255,.65);border-radius:10px;display:grid;place-items:center;
+            color:#8ef2ff;background:rgba(4,28,48,.75);box-shadow:0 0 22px rgba(0,204,255,.2);animation:vehicleGlow 2.5s infinite; }
+        .fleet-marker .trail { position:absolute;left:14px;top:28px;width:1px;height:36px;background:linear-gradient(#51eaff,transparent);opacity:.7; }
+        .fleet-a { left:57%;top:26%;animation:markerFloat 5s ease-in-out infinite; }
+        .fleet-b { left:69%;top:61%;animation:markerFloat 6s ease-in-out -2s infinite; }
+        .fleet-c { left:48%;top:67%;animation:markerFloat 7s ease-in-out -1s infinite; }
+        .route-overlay { position:absolute;inset:0;width:100%;height:100%;z-index:2;pointer-events:none;opacity:.68; }
+        .route-path { fill:none;stroke:#51e6ff;stroke-width:1.1;stroke-dasharray:5 8;filter:drop-shadow(0 0 4px #25c9f7);animation:routeDash 14s linear infinite; }
+        .bottom-bar { position:absolute;z-index:5;left:32px;right:32px;bottom:24px;display:flex;justify-content:space-between;align-items:center;gap:18px;pointer-events:none; }
+        .bottom-caption { color:#60889d;font-size:9px;letter-spacing:.18em;text-transform:uppercase; }
+        .bottom-stats { display:flex;gap:22px;align-items:center;color:#7fa6b9;font-size:10px;letter-spacing:.08em;text-transform:uppercase; }
+        .bottom-stats span { display:flex;align-items:center;gap:7px; }
+        .bottom-stats b { color:#d5f8ff;font-weight:700; }
+        .scanline { position:absolute;z-index:1;left:0;right:0;height:1px;top:-10%;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(64,223,255,.14),transparent);animation:scan 11s linear infinite; }
+        @keyframes livePulse { 50%{opacity:.45;box-shadow:0 0 4px #5bffc2;} }
+        @keyframes floatCard { 0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)} }
+        @keyframes barPulse { to{height:35%;opacity:.45} }
+        @keyframes vehicleGlow { 50%{box-shadow:0 0 28px rgba(0,204,255,.4);border-color:rgba(130,245,255,.95)} }
+        @keyframes markerFloat { 0%,100%{translate:0 0}50%{translate:0 -7px} }
+        @keyframes routeDash { to{stroke-dashoffset:-180} }
+        @keyframes scan { to{top:110%} }
+        @media (max-width:900px) {
+            .topbar{top:18px;left:18px;right:18px}.system-pill{display:none}
+            .hero-copy{top:43%;left:7%;max-width:330px}.hero-copy h1{font-size:clamp(38px,7vw,58px)}
+            .hud-one{right:4%;top:22%;transform:scale(.86);transform-origin:right top}
+            .hud-two{right:3%;bottom:17%;transform:scale(.86);transform-origin:right bottom}
+            .hud-three{left:18px;bottom:7%;min-width:175px}.bottom-bar{left:18px;right:18px;bottom:14px}
+            .bottom-caption{display:none}.bottom-stats{gap:12px}
+        }
+        @media (max-width:560px) {
+            .brand-mark{width:36px;height:36px;border-radius:11px}.brand-name{font-size:12px}.brand-sub{font-size:8px}
+            .login-btn{padding:11px 12px;font-size:10px;gap:7px;border-radius:12px}
+            .hero-copy{top:41%;left:24px;max-width:78%}.hero-copy h1{font-size:43px;margin:15px 0 12px}
+            .hero-copy p{font-size:12px;max-width:270px}.hero-line{margin-top:17px;font-size:8px}
+            .hud-card{padding:10px 12px;min-width:128px;border-radius:12px}.hud-label{font-size:8px}.hud-value{font-size:19px}
+            .hud-note{font-size:9px}.hud-one{top:auto;bottom:29%;right:4%;transform:scale(.8);transform-origin:right bottom}
+            .hud-two{display:none}.hud-three{left:18px;bottom:11%;min-width:155px}
+            .fleet-marker{font-size:8px}.fleet-marker .vehicle{width:25px;height:25px}
+            .fleet-a{left:61%;top:28%}.fleet-b{left:72%;top:57%}.fleet-c{left:47%;top:70%}
+            .bottom-bar{bottom:12px}.bottom-stats{font-size:8px;gap:9px}.bottom-stats span:nth-child(3){display:none}
+        }
+        @media (prefers-reduced-motion:reduce) {
+            .live-dot,.hud-card,.mini-bars i,.fleet-marker,.fleet-marker .vehicle,.route-path,.scanline{animation:none!important}
+            .login-btn,.login-arrow{transition:none!important}
+        }
 
-  .layer-bg{
-    background:
-      radial-gradient(circle at 50% 40%, var(--wall-warm) 0%, var(--wall) 45%, var(--void) 80%, #000 100%),
-      repeating-linear-gradient(100deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 40px);
-    transition:transform .3s ease-out;
-    will-change:transform;
-  }
 
-  .layer-rays{
-    background:conic-gradient(from 210deg at 50% 32%,
-      transparent 0deg, rgba(51,217,232,0.06) 6deg, transparent 16deg,
-      transparent 120deg, rgba(209,163,92,0.06) 128deg, transparent 140deg);
-    mix-blend-mode:screen;
-    animation:rays-spin 40s linear infinite;
-    opacity:.7;
-  }
-  @keyframes rays-spin{to{transform:rotate(360deg);}}
-
-  .fog{position:absolute; bottom:-8%; left:-20%; width:140%; height:32%; background:radial-gradient(ellipse at center, rgba(120,120,130,0.14), transparent 70%); filter:blur(20px);}
-  .fog.f1{animation:fog-drift 30s ease-in-out infinite;}
-  .fog.f2{bottom:-12%; height:24%; opacity:.6; animation:fog-drift 40s ease-in-out infinite reverse;}
-  @keyframes fog-drift{0%,100%{transform:translateX(0);}50%{transform:translateX(5%);}}
-  .fog.is-pushed{animation:none !important; transform:translateX(14%) scale(1.1); opacity:.2; transition:transform 1.6s var(--ease), opacity 1.6s var(--ease);}
-
-  .dust{position:absolute; inset:0; overflow:hidden;}
-  .mote{position:absolute; bottom:-4%; width:2.5px; height:2.5px; border-radius:50%; background:var(--cyan); opacity:0; animation-name:float-up; animation-timing-function:linear; animation-iteration-count:infinite;}
-  @keyframes float-up{0%{opacity:0; transform:translate(0,0);}10%{opacity:.55;}90%{opacity:.3;}100%{opacity:0; transform:translate(var(--drift,20px), -104vh);}}
-
-  /* ================= VAULT ================= */
-  .vault-wrap{
-    position:relative; z-index:2;
-    width:min(84vw, 560px); height:min(84vw, 560px);
-    display:flex; align-items:center; justify-content:center;
-    transition:transform .35s ease-out, filter .4s var(--ease);
-    will-change:transform;
-  }
-  .vault-wrap.is-dim{filter:brightness(.82);}
-
-  .ring{position:absolute; border-radius:50%; will-change:transform;}
-  .ring svg{display:block; width:100%; height:100%;}
-
-  .ring-outer{width:100%; height:100%; animation:spin var(--ring-outer-speed) linear infinite;}
-  .ring-mid{width:80%; height:80%; animation:spin var(--ring-mid-speed) linear infinite reverse;}
-  .ring-inner{width:58%; height:58%; animation:spin var(--ring-inner-speed) linear infinite;}
-  @keyframes spin{to{transform:rotate(360deg);}}
-  @keyframes spin-rev{to{transform:rotate(-360deg);}}
-
-  .lock-1-active .ring-outer{animation-play-state:paused;}
-  .lock-2-active .ring-mid,
-  .lock-2-active .ring-inner{animation-duration:16s;}
-  .charging .ring-inner{animation-duration:calc(16s - (var(--charge) * 11s));}
-  .rejected .ring-mid{animation-name:spin-rev; animation-duration:2.2s;}
-
-  .scan-sweep{
-    position:absolute; inset:6%;
-    border-radius:50%;
-    background:conic-gradient(from 0deg, transparent 0deg, var(--cyan-soft) 8deg, transparent 20deg);
-    opacity:0;
-    animation:sweep 3.4s linear infinite;
-    pointer-events:none;
-  }
-  @keyframes sweep{to{transform:rotate(360deg);}}
-  .lock-1-active .scan-sweep, .verifying .scan-sweep{opacity:1; animation-duration:1.1s;}
-  .rejected .scan-sweep{opacity:1; animation-duration:.8s; background:conic-gradient(from 0deg, transparent 0deg, var(--danger-soft) 10deg, transparent 24deg);}
-
-  .symbol{position:absolute; top:50%; left:50%; width:9px; height:9px; margin:-4.5px 0 0 -4.5px; transform-origin:center;}
-  .symbol::before{
-    content:""; position:absolute; inset:0;
-    background:var(--bronze-bright);
-    clip-path:polygon(50% 0%,100% 38%,80% 100%,20% 100%,0% 38%);
-    opacity:.3;
-    box-shadow:0 0 5px 1px rgba(209,163,92,0.25);
-    transition:opacity .4s var(--ease), box-shadow .4s var(--ease), background .4s var(--ease);
-  }
-  .lock-1-active .symbol::before{opacity:.65;}
-  .charging .symbol::before{background:var(--cyan); opacity:calc(.4 + var(--charge) * .5); box-shadow:0 0 calc(6px + var(--charge) * 10px) 1px var(--cyan-soft);}
-  .rejected .symbol::before{background:var(--danger); opacity:.85; box-shadow:0 0 8px 2px var(--danger-soft);}
-
-  .pin{position:absolute; top:50%; left:50%; width:3px; height:16px; margin:-8px 0 0 -1.5px; transform-origin:center; background:linear-gradient(180deg, var(--metal-hi), var(--metal-1)); border-radius:1px; transition:transform .5s var(--ease), background .4s var(--ease), box-shadow .4s var(--ease);}
-  .lock-1-active .pin{transform:var(--pin-transform) translateY(-3px);}
-  .lock-2-active .pin{background:linear-gradient(180deg, var(--cyan), var(--metal-1));}
-  .rejected .pin{transform:var(--pin-transform) translateY(4px) scaleY(.7); background:linear-gradient(180deg, var(--danger), var(--metal-1)); box-shadow:0 0 8px 1px var(--danger-soft);}
-  .is-open .pin{transform:var(--pin-transform) translateY(-26px); opacity:0;}
-
-  .vault-core{
-    position:relative; width:34%; height:34%; border-radius:50%;
-    background:
-      radial-gradient(circle at 38% 32%, var(--metal-hi), var(--metal-2) 40%, var(--metal-1) 72%, #101216 100%);
-    box-shadow:0 0 0 3px rgba(0,0,0,0.5), inset 0 0 24px rgba(0,0,0,0.7), 0 0 30px -6px rgba(0,0,0,0.7);
-  }
-  .vault-core::before{
-    content:"";
-    position:absolute; inset:18%;
-    border-radius:50%;
-    background:radial-gradient(circle, var(--cyan-soft), transparent 70%);
-    opacity:calc(.15 + var(--charge) * .55);
-    transition:opacity .4s var(--ease);
-  }
-  .core-pulse{
-    position:absolute; inset:-10%;
-    border-radius:50%;
-    background:radial-gradient(circle, var(--gold), transparent 65%);
-    opacity:0;
-    pointer-events:none;
-  }
-  .pulse-once .core-pulse{animation:core-pulse-anim .6s var(--ease);}
-  @keyframes core-pulse-anim{0%{opacity:0; transform:scale(.6);}40%{opacity:.9; transform:scale(1.3);}100%{opacity:0; transform:scale(1.8);}}
-
-  .vault-light{
-    position:absolute; inset:-20%;
-    border-radius:50%;
-    background:radial-gradient(circle, var(--gold), rgba(240,217,154,0.3) 40%, transparent 72%);
-    opacity:0;
-    transition:opacity 1.4s var(--ease);
-    pointer-events:none;
-  }
-  .is-open .vault-light{opacity:1;}
-  .is-open .vault-wrap-inner{transform:scale(1.06);}
-  .is-open .ring{animation-play-state:paused; transition:transform 1.4s var(--ease), opacity 1.2s var(--ease);}
-  .is-open .ring-outer{transform:scale(1.35); opacity:0;}
-  .is-open .ring-mid{transform:scale(1.25); opacity:0;}
-  .is-open .ring-inner{transform:scale(1.15); opacity:.15;}
-
-  /* ================= CONSOLE ================= */
-  .console{
-    position:absolute;
-    left:50%; bottom:4%;
-    transform:translateX(-50%);
-    z-index:4;
-    width:min(90vw, 320px);
-    padding:18px 18px 20px;
-    border-radius:8px;
-    background:linear-gradient(180deg, rgba(38,40,46,0.86), rgba(15,17,20,0.92));
-    border:1px solid rgba(209,163,92,0.22);
-    box-shadow:0 24px 50px -20px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.04);
-    backdrop-filter:blur(5px);
-    opacity:0;
-    transform:translateX(-50%) translateY(14px);
-    animation:console-in .8s var(--ease) forwards 3.3s;
-  }
-  @keyframes console-in{to{opacity:1; transform:translateX(-50%) translateY(0);}}
-  .console.is-leaving{opacity:0; transform:translateX(-50%) translateY(-10px) scale(.97); transition:opacity .5s var(--ease), transform .5s var(--ease); pointer-events:none;}
-  .console.is-shaking{animation:console-shake .5s var(--ease);}
-  @keyframes console-shake{10%,90%{transform:translateX(calc(-50% - 1px));}20%,80%{transform:translateX(calc(-50% + 3px));}30%,50%,70%{transform:translateX(calc(-50% - 6px));}40%,60%{transform:translateX(calc(-50% + 6px));}}
-
-  .console::before, .console::after{
-    content:""; position:absolute; width:5px; height:5px; border-radius:50%;
-    background:radial-gradient(circle, var(--metal-hi), var(--metal-1));
-    box-shadow:0 0 2px rgba(0,0,0,0.6);
-  }
-  .console::before{top:7px; left:7px;}
-  .console::after{top:7px; right:7px;}
-
-  .console-title{
-    font-family:'Orbitron',sans-serif; font-weight:700; font-size:11px;
-    letter-spacing:.2em; color:var(--bronze-bright); text-align:center;
-    margin-bottom:14px;
-  }
-
-  .intro-text{position:absolute; left:50%; top:14%; transform:translateX(-50%); z-index:3; text-align:center; height:30px;}
-  .intro-text .line{position:absolute; left:50%; top:0; transform:translate(-50%,6px); white-space:nowrap; font-family:'Orbitron',sans-serif; font-weight:600; letter-spacing:.28em; font-size:13px; color:var(--gold); text-shadow:0 0 14px var(--gold-soft); opacity:0;}
-  .line-1{animation:line-in-out 2.1s var(--ease) forwards 2.6s;}
-  .line-2{animation:line-in-out 2.1s var(--ease) forwards 4.6s;}
-  @keyframes line-in-out{0%{opacity:0; transform:translate(-50%,10px);}18%{opacity:1; transform:translate(-50%,0);}82%{opacity:1; transform:translate(-50%,0);}100%{opacity:0; transform:translate(-50%,-8px);}}
-
-  .status-banner{position:relative; z-index:3; text-align:center; max-height:0; opacity:0; overflow:hidden; transition:max-height .3s var(--ease), opacity .25s var(--ease), margin .3s var(--ease);}
-  .status-banner.is-visible{max-height:70px; opacity:1; margin-bottom:10px;}
-  .status-title{display:block; font-family:'Orbitron',sans-serif; font-weight:700; letter-spacing:.14em; font-size:12.5px;}
-  .status-sub{display:block; margin-top:4px; font-size:11.5px; color:var(--text-muted);}
-  .status-banner.tone-danger .status-title{color:var(--danger); text-shadow:0 0 10px var(--danger-soft);}
-  .status-banner.tone-ok .status-title{color:var(--gold); text-shadow:0 0 10px var(--gold-soft);}
-  .status-banner.tone-warn .status-title{color:var(--cyan); text-shadow:0 0 10px var(--cyan-soft);}
-  .status-banner.tone-scan .status-title{color:var(--cyan); font-size:10.5px; letter-spacing:.2em;}
-
-  form{display:flex; flex-direction:column; gap:13px;}
-  .field label{display:block; font-family:'Orbitron',sans-serif; font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px;}
-  .field-shell{position:relative; display:flex; align-items:center; border:1px solid rgba(209,163,92,0.2); border-radius:5px; background:rgba(0,0,0,0.3); transition:border-color .3s var(--ease), box-shadow .3s var(--ease);}
-  .field-shell:focus-within{border-color:var(--bronze-bright); box-shadow:0 0 0 3px rgba(209,163,92,0.15), 0 0 16px -4px var(--gold-soft);}
-  #passwordField .field-shell:focus-within{border-color:var(--cyan); box-shadow:0 0 0 3px var(--cyan-soft), 0 0 18px -2px var(--cyan-soft);}
-  .field.has-error .field-shell{border-color:var(--danger); box-shadow:0 0 0 3px var(--danger-soft);}
-  .field.shake-field{animation:field-shake .4s var(--ease);}
-  @keyframes field-shake{20%,80%{transform:translateX(2px);}30%,50%,70%{transform:translateX(-4px);}40%,60%{transform:translateX(4px);}}
-
-  .field-shell input{flex:1; min-width:0; background:transparent; border:none; outline:none; color:var(--text-primary); font-family:'Inter',sans-serif; font-size:13.5px; padding:11px 10px; letter-spacing:.02em;}
-  .field-shell input::placeholder{color:#4a4d52;}
-
-  .eye-toggle{flex:none; width:34px; height:34px; border:none; background:transparent; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:color .2s var(--ease);}
-  .eye-toggle:hover{color:var(--gold);}
-  .eye-toggle svg{width:15px;height:15px;}
-  .eye-toggle .icon-off{display:none;}
-  .eye-toggle.is-visible .icon-on{display:none;}
-  .eye-toggle.is-visible .icon-off{display:block;}
-
-  .field-msg{font-size:10.5px; color:var(--danger); letter-spacing:.03em; max-height:0; opacity:0; overflow:hidden; transition:max-height .25s var(--ease), opacity .2s var(--ease), margin .25s var(--ease);}
-  .field.has-error .field-msg{max-height:22px; opacity:1; margin-top:5px;}
-
-  .switch-btn{
-    position:relative; margin-top:2px; height:44px;
-    border:1px solid rgba(209,163,92,0.35); border-radius:6px;
-    background:linear-gradient(180deg, #2c2d32, #17181b);
-    color:var(--gold); font-family:'Orbitron',sans-serif; font-weight:700; font-size:11px; letter-spacing:.16em;
-    cursor:pointer; overflow:hidden;
-    box-shadow:0 8px 20px -10px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05);
-    transition:transform .12s var(--ease), box-shadow .3s var(--ease), border-color .3s var(--ease);
-  }
-  .switch-btn::before{content:""; position:absolute; top:0; left:-60%; width:36%; height:100%; background:linear-gradient(120deg, transparent, rgba(240,217,154,0.3), transparent); transform:skewX(-20deg); transition:left .6s var(--ease);}
-  .switch-btn:hover::before{left:120%;}
-  .switch-btn:hover{border-color:var(--bronze-bright); box-shadow:0 10px 24px -8px var(--gold-soft), inset 0 1px 0 rgba(255,255,255,0.06);}
-  .switch-btn:active, .switch-btn.is-pressed{transform:translateY(2px); box-shadow:inset 0 3px 8px rgba(0,0,0,0.6);}
-  .switch-btn:disabled{cursor:default;}
-  .switch-btn.is-verifying{color:var(--cyan); border-color:rgba(51,217,232,0.4);}
-  .switch-btn.is-granted{color:#12241f; background:linear-gradient(180deg, var(--gold), #c9a24f); border-color:transparent;}
-
-  .forgot-link{display:block; text-align:center; font-size:10.5px; color:var(--text-muted); text-decoration:none; margin-top:2px; transition:color .2s var(--ease);}
-  .forgot-link:hover{color:var(--gold);}
-
-  a:focus-visible, button:focus-visible, input:focus-visible{outline:2px solid var(--cyan); outline-offset:2px; border-radius:4px;}
-
-  @media (max-width:600px){
-    .vault-wrap{width:78vw; height:78vw;}
-    .console{bottom:2%;}
-  }
-
-  @media (prefers-reduced-motion: reduce){
-    *{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important;}
-    .ring, .layer-rays, .fog, .mote, .scan-sweep{animation:none !important; opacity:.35;}
-    .layer-bg, .vault-wrap{transform:none !important;}
-    .console{opacity:1; transform:translateX(-50%); animation:none;}
-    .intro-text .line{display:none;}
-  }
-</style>
+        /* ===== Fleet-login experience ===== */
+        .login-topbar { z-index: 20; }
+        .login-topbar .brand { text-decoration:none; }
+        .login-topbar .top-actions { margin-left:auto; }
+        .pill-divider { width:1px;height:12px;background:rgba(105,207,233,.25);display:inline-block;margin:0 2px; }
+        .login-hero { top:29%;left:6.2%;max-width:440px;z-index:5; }
+        .login-hero .eyebrow { display:flex;align-items:center;gap:10px;color:#80d9eb;font-size:10px;letter-spacing:.24em;text-transform:uppercase;font-weight:700; }
+        .eyebrow-line { width:25px;height:1px;background:#4de4ff;box-shadow:0 0 12px #4de4ff; }
+        .login-hero h1 { font-size:clamp(42px,5.1vw,76px);line-height:1.02;letter-spacing:-.055em;margin:22px 0 18px;color:#f2fbff;text-shadow:0 8px 40px rgba(0,0,0,.3); }
+        .login-hero h1 span { color:#65e7ff;text-shadow:0 0 30px rgba(40,198,255,.25); }
+        .login-hero p { max-width:385px;line-height:1.8;color:#9bb9c9;font-size:14px; }
+        .login-hero .hero-line { margin-top:27px;color:#7da8bb;font-size:9px;letter-spacing:.13em; }
+        .login-hero .hero-line b { color:#4fe6ff;margin:0 4px; }
+        .login-panel {
+            position:absolute;z-index:15;right:6.2%;top:50%;transform:translateY(-48%);
+            width:min(420px,38vw);padding:27px 29px 21px;border-radius:22px;
+            background:linear-gradient(145deg,rgba(7,24,42,.91),rgba(4,12,25,.86));
+            border:1px solid rgba(90,218,246,.25);
+            box-shadow:0 28px 90px rgba(0,0,0,.48),0 0 55px rgba(0,172,230,.09),inset 0 1px 0 rgba(210,250,255,.08);
+            backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+            animation:panel-arrive .9s cubic-bezier(.2,.8,.2,1) both .18s;
+        }
+        .login-panel::before { content:"";position:absolute;top:-1px;left:12%;right:12%;height:1px;background:linear-gradient(90deg,transparent,#74efff,transparent);opacity:.85; }
+        .login-panel::after { content:"";position:absolute;inset:8px;border:1px solid rgba(112,207,235,.055);border-radius:16px;pointer-events:none; }
+        @keyframes panel-arrive { from { opacity:0;transform:translate(24px,-45%) scale(.98);filter:blur(6px); } to { opacity:1;transform:translate(0,-48%) scale(1);filter:blur(0); } }
+        .panel-topline { position:relative;z-index:1;display:flex;align-items:center;gap:9px;font-size:8px;letter-spacing:.16em;color:#79b4c9;font-weight:700;white-space:nowrap; }
+        .panel-icon { display:grid;place-items:center;width:25px;height:25px;border:1px solid rgba(79,226,255,.3);border-radius:8px;color:#6feaff;font-size:17px;background:rgba(30,170,220,.09); }
+        .panel-live { margin-left:auto;display:flex;align-items:center;gap:6px;color:#7fffd0;font-size:8px;letter-spacing:.12em; }
+        .panel-live i,.session-note i { display:inline-block;width:5px;height:5px;border-radius:50%;background:#56ffc2;box-shadow:0 0 9px #56ffc2;animation:livePulse 1.8s infinite; }
+        .panel-heading { position:relative;z-index:1;margin:25px 0 23px; }
+        .panel-kicker { font-size:9px;letter-spacing:.24em;color:#57dff7;font-weight:800;margin-bottom:9px; }
+        .panel-heading h2 { margin:0;color:#f1fbff;font-size:clamp(25px,2.2vw,32px);letter-spacing:-.045em;line-height:1.15;font-weight:750; }
+        .panel-heading h2 span { color:#68e7ff; }
+        .panel-heading p { color:#8daebf;font-size:11px;line-height:1.7;margin:10px 0 0; }
+        .fleet-login-form { position:relative;z-index:1;display:flex;flex-direction:column;gap:17px; }
+        .login-field label { display:block;color:#9bbbc9;font-size:8px;font-weight:800;letter-spacing:.16em;margin-bottom:8px; }
+        .label-row { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+        .label-row label { margin-bottom:8px; }
+        .input-shell { height:49px;display:flex;align-items:center;gap:10px;padding:0 13px;border:1px solid rgba(111,191,219,.18);border-radius:11px;background:rgba(1,9,20,.55);transition:border-color .25s,box-shadow .25s,background .25s; }
+        .input-shell:focus-within { border-color:rgba(77,226,255,.78);background:rgba(5,25,42,.8);box-shadow:0 0 0 3px rgba(44,201,242,.09),0 0 24px rgba(29,177,227,.08); }
+        .input-icon { flex:none;width:17px;height:17px;color:#5da7c0;display:grid;place-items:center; }
+        .input-icon svg { width:17px;height:17px; }
+        .input-shell input { min-width:0;flex:1;border:0;outline:0;background:transparent;color:#eafaff;font:500 12px 'Inter',system-ui,sans-serif;letter-spacing:.01em; }
+        .input-shell input::placeholder { color:#476579; }
+        .input-status { width:5px;height:5px;border-radius:50%;background:#3f7185;transition:background .2s,box-shadow .2s; }
+        .input-shell:focus-within .input-status { background:#54e9ff;box-shadow:0 0 9px #54e9ff; }
+        .password-toggle { flex:none;width:28px;height:28px;display:grid;place-items:center;border:0;background:transparent;color:#6d9eb2;border-radius:7px;cursor:pointer; }
+        .password-toggle:hover { color:#8bf1ff;background:rgba(64,205,239,.08); }
+        .password-toggle svg { width:17px;height:17px; }
+        .eye-closed { display:none; }
+        .password-toggle.is-visible .eye-open { display:none; }
+        .password-toggle.is-visible .eye-closed { display:block; }
+        .forgot-link { color:#6bdcf3;text-decoration:none;font-size:9px;transition:color .2s; }
+        .forgot-link:hover { color:#fff; }
+        .remember-row { display:flex;align-items:center;gap:9px;color:#8caebd;font-size:10px;cursor:pointer;user-select:none; }
+        .remember-row input { position:absolute;opacity:0;width:1px;height:1px; }
+        .custom-check { width:15px;height:15px;border:1px solid rgba(103,195,220,.35);border-radius:4px;background:rgba(0,0,0,.25);display:grid;place-items:center;transition:all .2s; }
+        .remember-row input:checked + .custom-check { background:#40d6f2;border-color:#40d6f2;box-shadow:0 0 12px rgba(64,214,242,.25); }
+        .remember-row input:checked + .custom-check::after { content:"✓";color:#03202b;font-size:10px;font-weight:900; }
+        .remember-row input:focus-visible + .custom-check { outline:2px solid #64e8ff;outline-offset:3px; }
+        .session-note { display:flex;align-items:center;gap:6px;margin-left:auto;color:#5d91a5;font-size:7px;letter-spacing:.1em; }
+        .session-note i { width:4px;height:4px; }
+        .access-button { position:relative;width:100%;height:52px;overflow:hidden;border:1px solid rgba(105,239,255,.65);border-radius:11px;background:linear-gradient(105deg,#0a8bb1,#08779b 45%,#07516f);color:#effcff;cursor:pointer;box-shadow:0 9px 24px rgba(0,156,205,.18),inset 0 1px 0 rgba(255,255,255,.16);transition:transform .2s,box-shadow .25s,border-color .25s; }
+        .access-button:hover { transform:translateY(-2px);border-color:#a3f7ff;box-shadow:0 13px 30px rgba(0,177,228,.27),0 0 22px rgba(53,214,255,.12),inset 0 1px 0 rgba(255,255,255,.2); }
+        .access-button:active { transform:translateY(0) scale(.99); }
+        .access-button:disabled { cursor:wait;opacity:.85; }
+        .button-shine { position:absolute;inset:-20% auto -20% -50%;width:35%;transform:skewX(-22deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.24),transparent); }
+        .access-button:hover .button-shine { animation:button-sweep .8s ease; }
+        @keyframes button-sweep { to { left:130%; } }
+        .button-content { position:relative;display:flex;align-items:center;justify-content:center;gap:10px;height:100%;font-size:9px;font-weight:900;letter-spacing:.14em; }
+        .button-lock { font-size:15px;line-height:1; }
+        .button-arrow { position:absolute;right:16px;font-size:19px;font-weight:400;transition:transform .2s; }
+        .access-button:hover .button-arrow { transform:translateX(4px); }
+        .button-loader { display:none;position:absolute;width:18px;height:18px;right:16px;top:50%;margin-top:-9px;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;border-radius:50%;animation:spin-loader .7s linear infinite; }
+        .access-button.is-loading .button-loader { display:block; }
+        .access-button.is-loading .button-arrow { display:none; }
+        @keyframes spin-loader { to { transform:rotate(360deg); } }
+        .auth-alert { position:relative;z-index:1;display:flex;gap:9px;align-items:center;margin:-8px 0 17px;padding:10px 12px;border-radius:9px;font-size:10px;line-height:1.5; }
+        .auth-error { color:#ffb9b5;background:rgba(180,45,57,.12);border:1px solid rgba(255,99,109,.22); }
+        .auth-success { color:#a9ffe0;background:rgba(30,175,126,.1);border:1px solid rgba(78,255,190,.2); }
+        .alert-symbol { display:grid;place-items:center;flex:none;width:17px;height:17px;border:1px solid currentColor;border-radius:50%;font-weight:800; }
+        .field-error { margin-top:6px;color:#ff9f9a;font-size:10px; }
+        .panel-foot { position:relative;z-index:1;display:flex;align-items:center;gap:7px;margin-top:20px;padding-top:15px;border-top:1px solid rgba(114,193,218,.12);color:#6e96a8;font-size:9px; }
+        .shield-icon { color:#59dff5;font-size:16px; }
+        .foot-code { margin-left:auto;color:#426a7c;font-size:8px;letter-spacing:.12em; }
+        .login-hud { top:auto;left:6.2%;bottom:14%;right:auto;min-width:190px;z-index:5; }
+        .login-hud .hud-label { display:flex;align-items:center;gap:7px; }
+        .login-hud .hud-label .live-dot { width:5px;height:5px; }
+        .login-bottom { z-index:10; }
+        .route-overlay { z-index:1; }
+        @media (max-width:1100px) {
+            .login-hero { left:4%;max-width:36%;top:25%; }
+            .login-hero h1 { font-size:clamp(38px,4.6vw,56px); }
+            .login-hero p { font-size:12px; }
+            .login-panel { right:4%;width:min(400px,43vw);padding:23px 23px 19px; }
+            .login-hud { left:4%;bottom:12%; }
+        }
+        @media (max-width:760px) {
+            html,body { height:auto;min-height:100%;overflow:auto; }
+            .globe-section { position:fixed;min-height:100dvh;overflow:hidden; }
+            #globe { opacity:.72; }
+            .login-topbar { top:15px;left:16px;right:16px; }
+            .system-pill { padding:9px 10px;font-size:8px;gap:6px; }
+            .login-hero { top:12%;left:22px;right:22px;max-width:none; }
+            .login-hero h1 { font-size:35px;margin:11px 0 8px; }
+            .login-hero p { display:none; }
+            .login-hero .hero-line { display:none; }
+            .login-panel { position:absolute;top:47%;left:50%;right:auto;transform:translate(-50%,-10%);width:min(430px,calc(100% - 32px));padding:22px 21px 18px;border-radius:19px;animation:mobile-panel-arrive .8s ease both .15s; }
+            @keyframes mobile-panel-arrive { from { opacity:0;transform:translate(-50%,-4%) scale(.98); } to { opacity:1;transform:translate(-50%,-10%) scale(1); } }
+            .panel-heading { margin:17px 0 18px; }
+            .panel-heading h2 { font-size:27px; }
+            .panel-heading p { font-size:10px; }
+            .fleet-login-form { gap:14px; }
+            .input-shell { height:46px; }
+            .access-button { height:49px; }
+            .login-hud { display:none; }
+            .fleet-marker { opacity:.65; }
+            .fleet-a { left:7%;top:39%; }.fleet-b { left:72%;top:35%; }.fleet-c { left:7%;top:75%; }
+            .login-bottom { left:16px;right:16px;bottom:10px; }
+            .bottom-caption { display:none; }
+            .bottom-stats { justify-content:center;gap:13px;font-size:8px; }
+            .bottom-stats span:nth-child(3) { display:none; }
+        }
+        @media (max-width:420px) {
+            .brand-mark { width:34px;height:34px;border-radius:10px; }
+            .brand-name { font-size:11px;letter-spacing:.12em; }
+            .brand-sub { font-size:7px; }
+            .system-pill { font-size:7px;padding:8px; }
+            .login-hero { top:11%; }
+            .login-hero h1 { font-size:31px; }
+            .login-panel { top:43%;padding:20px 17px 16px; }
+            .panel-topline { font-size:7px;gap:6px; }
+            .panel-icon { width:22px;height:22px; }
+            .panel-heading h2 { font-size:24px; }
+            .panel-heading p { max-width:270px; }
+            .session-note { font-size:6px; }
+            .button-content { font-size:8px; }
+            .panel-foot { font-size:8px; }
+        }
+        @media (max-height:760px) and (min-width:761px) {
+            .login-panel { padding:18px 23px 15px; }
+            .panel-heading { margin:15px 0 16px; }
+            .panel-heading h2 { font-size:27px; }
+            .fleet-login-form { gap:12px; }
+            .input-shell { height:44px; }
+            .access-button { height:46px; }
+            .panel-foot { margin-top:13px;padding-top:11px; }
+            .login-hero { top:24%; }
+        }
+        @media (prefers-reduced-motion:reduce) {
+            .login-panel,.login-hero h1,.access-button,.button-shine { animation:none!important;transition:none!important; }
+        }
+    </style>
+    @endverbatim
 </head>
 <body>
+    <section class="globe-section" aria-label="Eemotrack fleet login">
+        <canvas id="globe" aria-label="Interactive animated globe"></canvas>
+        <div class="ambient"></div>
+        <div class="vignette"></div>
+        <div class="scanline" aria-hidden="true"></div>
 
-<div class="cursor-trail" id="cursorTrail" aria-hidden="true"></div>
-<div class="flash-black" id="flashBlack" aria-hidden="true"></div>
-<div class="flash-red" id="flashRed" aria-hidden="true"></div>
+        <header class="topbar login-topbar">
+            <a class="brand" href="{{ url('/') }}" aria-label="{{ config('app.name', 'Eemotrack') }} home">
+                <div class="brand-mark" aria-hidden="true">✦</div>
+                <div>
+                    <div class="brand-name">{{ strtoupper(config('app.name', 'EEMOTRACK')) }}</div>
+                    <div class="brand-sub">Global Fleet Intelligence</div>
+                </div>
+            </a>
+            <div class="top-actions">
+                <div class="system-pill"><span class="live-dot"></span> SECURE NETWORK <span class="pill-divider"></span> ONLINE</div>
+            </div>
+        </header>
 
-<div class="scene" id="scene">
-  <div class="layer layer-bg" id="layerBg"></div>
-  <div class="layer layer-rays" aria-hidden="true"></div>
-  <div class="fog f1" aria-hidden="true" id="fog1"></div>
-  <div class="fog f2" aria-hidden="true" id="fog2"></div>
-  <div class="dust" id="dustLayer" aria-hidden="true"></div>
-
-  <div class="vault-wrap" id="vaultWrap">
-    <div class="vault-wrap-inner" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;transition:transform 1.4s var(--ease);">
-
-      <div class="ring ring-outer" id="ringOuter" aria-hidden="true">
-        <svg viewBox="0 0 200 200">
-          <circle cx="100" cy="100" r="94" fill="none" stroke="var(--metal-2)" stroke-width="5" stroke-dasharray="3 4.2" opacity="0.55"/>
-          <circle cx="100" cy="100" r="86" fill="none" stroke="var(--metal-1)" stroke-width="1" opacity="0.6"/>
-        </svg>
-      </div>
-
-      <div class="ring ring-mid" id="ringMid" aria-hidden="true">
-        <svg viewBox="0 0 200 200">
-          <circle cx="100" cy="100" r="92" fill="none" stroke="var(--bronze)" stroke-width="1.4" stroke-dasharray="1 7" opacity="0.6"/>
-          <circle cx="100" cy="100" r="70" fill="none" stroke="var(--metal-2)" stroke-width="2" opacity="0.4"/>
-        </svg>
-      </div>
-
-      <div class="ring ring-inner" id="ringInner" aria-hidden="true">
-        <svg viewBox="0 0 200 200">
-          <circle cx="100" cy="100" r="90" fill="none" stroke="var(--cyan)" stroke-width="1" stroke-dasharray="10 6" opacity="0.35"/>
-        </svg>
-      </div>
-
-      <div class="scan-sweep" aria-hidden="true"></div>
-
-      <div class="vault-core" id="vaultCore">
-        <span class="core-pulse" aria-hidden="true"></span>
-      </div>
-      <div class="vault-light" aria-hidden="true"></div>
-    </div>
-  </div>
-
-  <div class="intro-text" aria-hidden="true">
-    <span class="line line-1">THE LAST KEY</span>
-    <span class="line line-2">IDENTITY REQUIRED</span>
-  </div>
-
-  <div class="console" id="console">
-    <div class="console-title">IDENTITY SEQUENCE</div>
-
-    <div class="status-banner" id="statusBanner" role="alert" aria-live="assertive">
-      <span class="status-title" id="statusTitle"></span>
-      <span class="status-sub" id="statusSub"></span>
-    </div>
-
-    <form id="loginForm" novalidate autocomplete="on">
-      @csrf
-
-      <div class="field" id="emailField">
-        <label for="email">Email</label>
-        <div class="field-shell">
-          <input type="email" id="email" name="email" placeholder="you@domain.com" value="{{ old('email') }}" required autocomplete="username" autofocus>
+        <div class="hero-copy login-hero">
+            <div class="eyebrow"><span class="eyebrow-line"></span> THE WORLD. YOUR FLEET.</div>
+            <h1>Every mile.<br><span>In control.</span></h1>
+            <p>One connected view of your vehicles, journeys and operations. Welcome back to your fleet command centre.</p>
+            <div class="hero-line"><span class="line"></span> LIVE TRACKING <b>·</b> SMARTER JOURNEYS <b>·</b> TOTAL CONTROL</div>
         </div>
-        <div class="field-msg" id="emailMsg"></div>
-      </div>
 
-      <div class="field" id="passwordField">
-        <label for="password">Secret Key</label>
-        <div class="field-shell">
-          <input type="password" id="password" name="password" required autocomplete="current-password">
-          <button type="button" class="eye-toggle" id="eyeToggle" aria-label="Show password" aria-pressed="false">
-            <svg class="icon-on" viewBox="0 0 24 24" fill="none"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>
-            <svg class="icon-off" viewBox="0 0 24 24" fill="none"><path d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M6.5 6.7C4 8.3 2 12 2 12s3.6 7 10 7c1.8 0 3.4-.5 4.7-1.3M17.8 15.4C19.9 13.8 22 12 22 12s-3.6-7-10-7c-.8 0-1.6.1-2.3.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-          </button>
+        <div class="fleet-marker fleet-a"><span class="vehicle">↗</span><span>UNIT 024<span class="trail"></span></span></div>
+        <div class="fleet-marker fleet-b"><span class="vehicle">↗</span><span>UNIT 108<span class="trail"></span></span></div>
+        <div class="fleet-marker fleet-c"><span class="vehicle">↗</span><span>UNIT 067<span class="trail"></span></span></div>
+
+        <div class="hud-card hud-one login-hud">
+            <div class="hud-label">FLEET NETWORK <span class="live-dot"></span></div>
+            <div class="hud-value">Connected <small>● LIVE</small></div>
+            <div class="hud-note">GPS signal intelligence</div>
+            <div class="mini-bars" aria-hidden="true">
+                <i style="height:45%"></i><i style="height:70%"></i><i style="height:54%"></i><i style="height:88%"></i><i style="height:63%"></i><i style="height:100%"></i><i style="height:75%"></i><i style="height:92%"></i><i style="height:58%"></i><i style="height:80%"></i>
+            </div>
         </div>
-        <div class="field-msg" id="passwordMsg"></div>
-      </div>
 
-      <button type="submit" class="switch-btn" id="switchBtn">
-        <span id="btnLabel">INITIATE ACCESS</span>
-      </button>
+        <aside class="login-panel" id="loginPanel">
+            <div class="panel-topline"><span class="panel-icon">⌁</span><span>FLEET COMMAND / AUTH 01</span><span class="panel-live"><i></i> SECURE</span></div>
+            <div class="panel-heading">
+                <div class="panel-kicker">WELCOME BACK</div>
+                <h2>Sign in to <span>your fleet.</span></h2>
+                <p>Enter your credentials to access your tracking dashboard.</p>
+            </div>
 
-      <a href="{{ route('password.request') }}" class="forgot-link">Recover secret key</a>
-    </form>
-  </div>
-</div>
+            @if (session('status'))
+                <div class="auth-alert auth-success" role="status">{{ session('status') }}</div>
+            @endif
+            @if ($errors->any())
+                <div class="auth-alert auth-error" role="alert">
+                    <span class="alert-symbol">!</span>
+                    <span>{{ $errors->first() }}</span>
+                </div>
+            @endif
 
-<script>
-(function () {
-  "use strict";
+            <form method="POST" action="{{ route('login') }}" class="fleet-login-form" id="fleetLoginForm">
+                @csrf
+                <div class="login-field">
+                    <label for="email">EMAIL / USER ID</label>
+                    <div class="input-shell">
+                        <span class="input-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="14" rx="2.5" stroke="currentColor" stroke-width="1.5"/><path d="m5 7 7 5 7-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </span>
+                        <input id="email" type="email" name="email" value="{{ old('email') }}" placeholder="name@company.com" autocomplete="username" required autofocus>
+                        <span class="input-status" aria-hidden="true"></span>
+                    </div>
+                    @error('email') <div class="field-error">{{ $message }}</div> @enderror
+                </div>
 
-  /* =========================================================
-     CONFIG
-     ========================================================= */
-  const LOGIN_URL    = "{{ route('login') }}";                     // ← LOGIN_URL
-  const REDIRECT_URL = "{{ route('dashboard') ?? '/dashboard' }}"; // ← REDIRECT_URL
-  const MIN_CINEMATIC_MS = 1700;   // ← ANIMATION SPEED (min "authenticating" duration)
-  const SYMBOL_COUNT_DESKTOP = 8;  // ← PARTICLE COUNT (engraved symbols)
-  const SYMBOL_COUNT_MOBILE  = 6;
-  const PIN_COUNT_DESKTOP = 12;    // ← PARTICLE COUNT (lock pins)
-  const PIN_COUNT_MOBILE  = 8;
-  const DUST_COUNT_DESKTOP = 24;   // ← PARTICLE COUNT (floating dust)
-  const DUST_COUNT_MOBILE  = 9;
+                <div class="login-field">
+                    <div class="label-row"><label for="password">PASSWORD / ACCESS KEY</label>
+                        @if (Route::has('password.request'))
+                            <a href="{{ route('password.request') }}" class="forgot-link">Forgot password?</a>
+                        @endif
+                    </div>
+                    <div class="input-shell">
+                        <span class="input-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none"><rect x="4.5" y="10" width="15" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="15" r="1.2" fill="currentColor"/></svg>
+                        </span>
+                        <input id="password" type="password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+                        <button class="password-toggle" type="button" id="passwordToggle" aria-label="Show password" aria-pressed="false">
+                            <svg class="eye-open" viewBox="0 0 24 24" fill="none"><path d="M2.5 12s3.4-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.4 6.5-9.5 6.5S2.5 12 2.5 12Z" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2.8" stroke="currentColor" stroke-width="1.5"/></svg>
+                            <svg class="eye-closed" viewBox="0 0 24 24" fill="none"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M6.4 6.5C3.9 8.1 2.5 12 2.5 12s3.4 6.5 9.5 6.5c1.6 0 3-.4 4.2-1M10 5.7c.6-.1 1.3-.2 2-.2 6.1 0 9.5 6.5 9.5 6.5s-.9 1.7-2.5 3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                        </button>
+                    </div>
+                    @error('password') <div class="field-error">{{ $message }}</div> @enderror
+                </div>
 
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const isMobile     = window.matchMedia('(max-width: 640px)').matches || window.matchMedia('(pointer: coarse)').matches;
+                <label class="remember-row"><input type="checkbox" name="remember" id="remember" {{ old('remember') ? 'checked' : '' }}><span class="custom-check"></span><span>Keep me signed in</span><span class="session-note"><i></i> ENCRYPTED SESSION</span></label>
 
-  const vaultWrap   = document.getElementById('vaultWrap');
-  const ringMid     = document.getElementById('ringMid');
-  const layerBg     = document.getElementById('layerBg');
-  const dustLayer   = document.getElementById('dustLayer');
-  const cursorTrail = document.getElementById('cursorTrail');
-  const flashBlack  = document.getElementById('flashBlack');
-  const flashRed    = document.getElementById('flashRed');
-  const fog1        = document.getElementById('fog1');
-  const fog2        = document.getElementById('fog2');
-  const vaultCore   = document.getElementById('vaultCore');
-  const consoleEl   = document.getElementById('console');
-  const form        = document.getElementById('loginForm');
-  const emailField  = document.getElementById('emailField');
-  const passField   = document.getElementById('passwordField');
-  const emailInput  = document.getElementById('email');
-  const passInput   = document.getElementById('password');
-  const emailMsg    = document.getElementById('emailMsg');
-  const passMsg     = document.getElementById('passwordMsg');
-  const switchBtn   = document.getElementById('switchBtn');
-  const btnLabel    = document.getElementById('btnLabel');
-  const eyeToggle   = document.getElementById('eyeToggle');
-  const statusBanner= document.getElementById('statusBanner');
-  const statusTitle = document.getElementById('statusTitle');
-  const statusSub   = document.getElementById('statusSub');
-  const csrfToken   = document.querySelector('meta[name="csrf-token"]').content;
+                <button type="submit" class="access-button" id="accessButton">
+                    <span class="button-shine"></span>
+                    <span class="button-content"><span class="button-lock">↗</span><span class="button-label">ACCESS FLEET DASHBOARD</span><span class="button-arrow">→</span></span>
+                    <span class="button-loader" aria-hidden="true"></span>
+                </button>
+            </form>
 
-  let isSubmitting = false;
-  let lastPinPulseLen = 0;
+            <div class="panel-foot"><span class="shield-icon">⬡</span><span>Protected by secure authentication</span><span class="foot-code">EEMO / 01</span></div>
+        </aside>
 
-  /* ---------- place symbols on mid ring, pins on inner edge ---------- */
-  function placeRadial(container, count, radius, className, extraStyleFn) {
-    for (let i = 0; i < count; i++) {
-      const angle = (360 / count) * i;
-      const el = document.createElement('span');
-      el.className = className;
-      const t = `rotate(${angle}deg) translate(${radius}px)`;
-      el.style.setProperty('--pin-transform', t);
-      el.style.transform = t + ` rotate(${-angle}deg)`;
-      if (extraStyleFn) extraStyleFn(el, angle);
-      container.appendChild(el);
-    }
-  }
-  const symbolCount = isMobile ? SYMBOL_COUNT_MOBILE : SYMBOL_COUNT_DESKTOP;
-  const pinCount = isMobile ? PIN_COUNT_MOBILE : PIN_COUNT_DESKTOP;
-  placeRadial(ringMid, symbolCount, isMobile ? 108 : 148, 'symbol');
-  placeRadial(vaultWrap, pinCount, isMobile ? 132 : 182, 'pin', function (el, angle) {
-    el.style.setProperty('--pin-transform', `translate(-50%,-50%) rotate(${angle}deg) translateY(-${isMobile ? 132 : 182}px)`);
-    el.style.transform = `translate(-50%,-50%) rotate(${angle}deg) translateY(-${isMobile ? 132 : 182}px)`;
-    el.style.top = '50%'; el.style.left = '50%'; el.style.margin = '0';
-  });
+        <footer class="bottom-bar login-bottom">
+            <div class="bottom-caption">Eemotrack <span>·</span> Fleet intelligence system</div>
+            <div class="bottom-stats">
+                <span><i class="live-dot"></i> Network <b>Operational</b></span>
+                <span>GPS <b>Connected</b></span>
+                <span>Access <b>Encrypted</b></span>
+            </div>
+        </footer>
+    </section>
+    <!-- Three.js + post-processing (bloom) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
 
-  /* ---------- dust ---------- */
-  if (!reduceMotion) {
-    const dustCount = isMobile ? DUST_COUNT_MOBILE : DUST_COUNT_DESKTOP;
-    for (let i = 0; i < dustCount; i++) {
-      const mote = document.createElement('span');
-      mote.className = 'mote';
-      mote.style.left = (Math.random() * 100) + '%';
-      mote.style.setProperty('--drift', (Math.random() * 60 - 30) + 'px');
-      mote.style.animationDuration = (10 + Math.random() * 10) + 's';
-      mote.style.animationDelay = (-Math.random() * 14) + 's';
-      dustLayer.appendChild(mote);
-    }
-  }
+    @verbatim
+    <script>
+    (() => {
+        'use strict';
 
-  /* ---------- parallax + cursor ---------- */
-  if (!reduceMotion && !isMobile) {
-    let tX = 0, tY = 0, cX = 0, cY = 0;
-    let cursorX = innerWidth / 2, cursorY = innerHeight / 2, tcX = cursorX, tcY = cursorY;
+        /* ================= Config ================= */
+        const R = 3; // globe ka radius
+        const isMobile = matchMedia('(max-width: 768px)').matches || /Mobi|Android/i.test(navigator.userAgent);
+        const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const CFG = {
+            nodes: isMobile ? 190 : 340,
+            arcs: isMobile ? 70 : 135,
+            particles: isMobile ? 220 : 650,
+            pulses: isMobile ? 35 : 70,
+            pixelRatio: Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2),
+            autoSpeed: -0.07
+        };
 
-    window.addEventListener('mousemove', function (e) {
-      tX = e.clientX / innerWidth - 0.5;
-      tY = e.clientY / innerHeight - 0.5;
-      tcX = e.clientX; tcY = e.clientY;
-    });
+        /* ================= Deterministic random (seed fix, reload par layout same) ================= */
+        function mulberry32(a) {
+            return function () {
+                a |= 0; a = a + 0x6D2B79F5 | 0;
+                let t = Math.imul(a ^ a >>> 15, 1 | a);
+                t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+        const rnd = mulberry32(20240527);
 
-    function tick() {
-      cX += (tX - cX) * 0.06;
-      cY += (tY - cY) * 0.06;
-      layerBg.style.transform = `translate(${cX * -16}px, ${cY * -10}px) scale(1.05)`;
-      vaultWrap.style.transform = `translate(${cX * 14}px, ${cY * 9}px)`;
-      consoleEl.style.marginLeft = (cX * -6) + 'px';
+        /* ================= Geo helpers ================= */
+        const toVec = (lat, lon, r = R) => {
+            const la = lat * Math.PI / 180, lo = lon * Math.PI / 180;
+            return new THREE.Vector3(r * Math.cos(la) * Math.cos(lo), r * Math.sin(la), -r * Math.cos(la) * Math.sin(lo));
+        };
 
-      cursorX += (tcX - cursorX) * 0.2;
-      cursorY += (tcY - cursorY) * 0.2;
-      cursorTrail.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
+        // Simplified continent outlines [lon, lat]
+        const LAND = [
+            [[-168,66],[-156,71],[-125,70],[-95,72],[-80,68],[-62,60],[-55,50],[-66,44],[-76,35],[-81,25],[-97,26],[-106,23],[-115,30],[-123,38],[-125,48],[-140,60]],
+            [[-106,23],[-97,20],[-88,16],[-83,9],[-77,8],[-80,9],[-86,14],[-92,15],[-105,20]],
+            [[-78,8],[-70,12],[-60,10],[-50,0],[-35,-6],[-40,-22],[-48,-28],[-58,-38],[-66,-48],[-70,-54],[-74,-48],[-72,-30],[-70,-18],[-81,-6],[-80,2]],
+            [[-55,60],[-45,60],[-20,70],[-20,82],[-40,83],[-65,80],[-70,76]],
+            [[-10,36],[-9,43],[-2,48],[5,52],[10,57],[20,60],[28,70],[40,68],[60,70],[80,73],[105,77],[130,72],[160,70],[180,68],[180,62],[160,58],[140,54],[135,43],[127,38],[122,30],[120,22],[108,18],[106,10],[100,8],[103,2],[98,10],[92,20],[80,14],[77,8],[72,20],[67,25],[57,25],[56,26],[48,30],[50,24],[56,17],[43,13],[35,28],[34,31],[27,37],[22,37],[18,40],[12,44],[8,44],[3,43],[-5,36]],
+            [[-17,21],[-10,30],[-5,36],[10,37],[20,33],[32,31],[35,28],[43,12],[51,12],[40,-3],[40,-15],[35,-25],[20,-35],[17,-30],[12,-17],[9,-1],[9,4],[-8,4],[-17,14]],
+            [[114,-22],[122,-18],[130,-12],[137,-12],[142,-11],[146,-19],[153,-26],[150,-37],[140,-38],[130,-32],[115,-34]],
+            [[95,5],[105,-6],[120,-8],[140,-8],[140,-3],[120,1],[108,2]],
+            [[-6,50],[1,51],[-2,58],[-6,57]],
+            [[130,32],[135,34],[141,38],[142,44],[140,41],[133,35]]
+        ];
 
-    document.querySelectorAll('input, button, a').forEach(function (el) {
-      el.addEventListener('mouseenter', () => cursorTrail.classList.add('is-active'));
-      el.addEventListener('mouseleave', () => cursorTrail.classList.remove('is-active'));
-    });
-  } else {
-    cursorTrail.style.display = 'none';
-  }
+        // Hub cities [lat, lon]
+        const HUBS = [
+            [40.7,-74],[34,-118],[19.4,-99],[-23.5,-46.6],[-34.6,-58.4],[51.5,0],[48.8,2.3],[52.5,13.4],
+            [55.7,37.6],[30,31],[6.5,3.4],[-1.3,36.8],[-33.9,18.4],[25.2,55.3],[19,72.9],[28.6,77.2],
+            [25.6,85.1],[1.35,103.8],[39.9,116.4],[31.2,121.5],[35.7,139.7],[-33.9,151.2],[-6.2,106.8],[43.7,-79.4]
+        ];
 
-  /* ---------- lock 1 : identity / email ---------- */
-  emailInput.addEventListener('focus', function () {
-    vaultWrap.classList.add('lock-1-active');
-    flashStatusScan('IDENTITY SCAN ACTIVE');
-  });
-  emailInput.addEventListener('blur', function () {
-    vaultWrap.classList.remove('lock-1-active');
-  });
-  emailInput.addEventListener('input', function () {
-    const len = emailInput.value.length;
-    if (len > 0 && len % 4 === 0 && len !== lastPinPulseLen) {
-      lastPinPulseLen = len;
-      pulseCore();
-    }
-  });
+        /* ================= Renderer / scene / camera ================= */
+        const canvas = document.getElementById('globe');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(CFG.pixelRatio);
+        renderer.setClearColor(0x000000, 1);
 
-  /* ---------- lock 2 : secret key / password ---------- */
-  passInput.addEventListener('focus', function () {
-    vaultWrap.classList.add('lock-2-active', 'charging');
-    vaultWrap.classList.add('is-dim');
-  });
-  passInput.addEventListener('blur', function () {
-    if (!passInput.value) {
-      vaultWrap.classList.remove('lock-2-active', 'charging', 'is-dim');
-      vaultWrap.style.setProperty('--charge', 0);
-    }
-  });
-  passInput.addEventListener('input', function () {
-    const len = passInput.value.length;
-    const charge = len <= 0 ? 0 : len <= 3 ? 0.25 : len <= 6 ? 0.5 : len <= 9 ? 0.75 : 1;
-    vaultWrap.style.setProperty('--charge', charge.toFixed(2));
-  });
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+        const world = new THREE.Group();   // orbits + sab kuch
+        const pivot = new THREE.Group();   // globe ka tilt (drag up/down)
+        const spin = new THREE.Group();    // globe ka vertical axis rotation
+        scene.add(world); world.add(pivot); pivot.add(spin);
+        pivot.rotation.x = 0.35;
+        spin.rotation.y = -(90 + 80) * Math.PI / 180; // shuru mein Asia/India front mein
 
-  function pulseCore() {
-    vaultCore.parentElement.classList.add('pulse-once');
-    vaultCore.classList.add('pulse-once');
-    setTimeout(() => vaultCore.classList.remove('pulse-once'), 650);
-  }
+        // Shared uniforms
+        const U = { uTime: { value: 0 }, uScale: { value: 1 } };
 
-  /* ---------- eye toggle ---------- */
-  eyeToggle.addEventListener('click', function () {
-    const showing = passInput.type === 'text';
-    passInput.type = showing ? 'password' : 'text';
-    eyeToggle.classList.toggle('is-visible', !showing);
-    eyeToggle.setAttribute('aria-pressed', String(!showing));
-    eyeToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
-    pulseCore();
-  });
+        /* ================= Land mask + texture ================= */
+        const TW = 2048, TH = 1024;
+        const pathPoly = (g, poly) => {
+            g.beginPath();
+            poly.forEach(([lo, la], i) => {
+                const x = (lo + 180) / 360 * TW, y = (90 - la) / 180 * TH;
+                i ? g.lineTo(x, y) : g.moveTo(x, y);
+            });
+            g.closePath();
+        };
+        const landCanvas = document.createElement('canvas');
+        landCanvas.width = TW; landCanvas.height = TH;
+        const lg = landCanvas.getContext('2d');
+        lg.fillStyle = '#fff';
+        LAND.forEach(p => { pathPoly(lg, p); lg.fill(); });
+        const landData = lg.getImageData(0, 0, TW, TH).data;
+        const isLand = (lat, lon) => {
+            const x = Math.min(TW - 1, Math.floor((lon + 180) / 360 * TW));
+            const y = Math.min(TH - 1, Math.floor((90 - lat) / 180 * TH));
+            return landData[(y * TW + x) * 4 + 3] > 128;
+        };
 
-  /* ---------- helpers ---------- */
-  function isValidEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+        function buildGlobeTexture() {
+            const c = document.createElement('canvas'); c.width = TW; c.height = TH;
+            const g = c.getContext('2d');
+            const grd = g.createLinearGradient(0, 0, 0, TH);
+            grd.addColorStop(0, '#02060f'); grd.addColorStop(.5, '#06152a'); grd.addColorStop(1, '#02060f');
+            g.fillStyle = grd; g.fillRect(0, 0, TW, TH);
 
-  function setFieldError(fieldEl, msgEl, message) { fieldEl.classList.add('has-error'); msgEl.textContent = message; }
-  function clearFieldError(fieldEl, msgEl) { fieldEl.classList.remove('has-error'); msgEl.textContent = ''; }
-  function shakeField(fieldEl) { fieldEl.classList.remove('shake-field'); void fieldEl.offsetWidth; fieldEl.classList.add('shake-field'); setTimeout(() => fieldEl.classList.remove('shake-field'), 400); }
-  function shakeConsole() { consoleEl.classList.remove('is-shaking'); void consoleEl.offsetWidth; consoleEl.classList.add('is-shaking'); setTimeout(() => consoleEl.classList.remove('is-shaking'), 500); }
+            // Graticule (lat/lon lines) - bahut subtle
+            g.strokeStyle = 'rgba(40,200,230,0.05)'; g.lineWidth = 1;
+            for (let lo = -180; lo <= 180; lo += 15) { const x = (lo + 180) / 360 * TW; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, TH); g.stroke(); }
+            for (let la = -75; la <= 75; la += 15) { const y = (90 - la) / 180 * TH; g.beginPath(); g.moveTo(0, y); g.lineTo(TW, y); g.stroke(); }
 
-  function showStatus(tone, title, sub) {
-    statusBanner.className = 'status-banner is-visible tone-' + tone;
-    statusTitle.textContent = title;
-    statusSub.textContent = sub || '';
-  }
-  function hideStatus() { statusBanner.className = 'status-banner'; statusTitle.textContent = ''; statusSub.textContent = ''; }
-  function flashStatusScan(text) {
-    showStatus('scan', text, '');
-    setTimeout(function () { if (statusTitle.textContent === text) hideStatus(); }, 1300);
-  }
+            // Continents ko tint karke low opacity mein fill
+            const tint = document.createElement('canvas'); tint.width = TW; tint.height = TH;
+            const tg = tint.getContext('2d');
+            tg.drawImage(landCanvas, 0, 0);
+            tg.globalCompositeOperation = 'source-in';
+            tg.fillStyle = '#1fb8d8'; tg.fillRect(0, 0, TW, TH);
+            g.globalAlpha = 0.14; g.drawImage(tint, 0, 0); g.globalAlpha = 1;
 
-  emailInput.addEventListener('input', () => clearFieldError(emailField, emailMsg));
-  passInput.addEventListener('input', () => clearFieldError(passField, passMsg));
+            // Dotted land texture
+            g.fillStyle = 'rgba(70,230,240,0.30)';
+            for (let y = 4; y < TH; y += 9) for (let x = 4; x < TW; x += 9) {
+                if (landData[(y * TW + x) * 4 + 3] > 128) { g.beginPath(); g.arc(x, y, 1.4, 0, 6.2832); g.fill(); }
+            }
+            // Coast outline
+            g.strokeStyle = 'rgba(60,220,240,0.22)'; g.lineWidth = 1.5;
+            LAND.forEach(p => { pathPoly(g, p); g.stroke(); });
 
-  function validateClientSide() {
-    let ok = true;
-    const email = emailInput.value.trim();
-    const password = passInput.value;
+            const tex = new THREE.CanvasTexture(c);
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return tex;
+        }
 
-    if (!email) {
-      setFieldError(emailField, emailMsg, 'INVALID IDENTITY'); shakeField(emailField); ok = false;
-    } else if (!isValidEmail(email)) {
-      setFieldError(emailField, emailMsg, 'INVALID IDENTITY'); shakeField(emailField); ok = false;
-    }
-    if (!password) {
-      setFieldError(passField, passMsg, 'SECURITY KEY REQUIRED'); shakeField(passField); ok = false;
-    }
-    return ok;
-  }
+        /* ================= Globe + atmosphere ================= */
+        const globe = new THREE.Mesh(
+            new THREE.SphereGeometry(R, 96, 96),
+            new THREE.ShaderMaterial({
+                uniforms: { uMap: { value: buildGlobeTexture() } },
+                vertexShader: `
+                    varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+                    void main(){
+                        vUv = uv; vN = normalize(normalMatrix * normal);
+                        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                        vV = normalize(-mv.xyz);
+                        gl_Position = projectionMatrix * mv;
+                    }`,
+                fragmentShader: `
+                    uniform sampler2D uMap; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+                    void main(){
+                        vec3 tex = texture2D(uMap, vUv).rgb;
+                        vec3 L = normalize(vec3(-0.55, 0.5, 0.7));
+                        float d = max(dot(vN, L), 0.0) * 0.7 + 0.3;
+                        float f = pow(1.0 - max(dot(vN, vV), 0.0), 2.6);
+                        vec3 col = tex * d * 1.15 + vec3(0.0, 0.75, 0.9) * f * 0.55;
+                        gl_FragColor = vec4(col, 1.0);
+                    }`
+            })
+        );
+        spin.add(globe);
 
-  /* ---------- authentication phases ---------- */
-  const phases = ['PHASE 01 · VERIFYING IDENTITY...', 'PHASE 02 · SEARCHING ARCHIVE...', 'PHASE 03 · VALIDATING KEY...', 'PHASE 04 · OPENING SECURITY CHANNEL...'];
-  let phaseTimer = null;
-  function startPhases() {
-    let i = 0;
-    showStatus('warn', phases[0]);
-    phaseTimer = setInterval(function () {
-      i = (i + 1) % phases.length;
-      showStatus('warn', phases[i]);
-    }, Math.round(MIN_CINEMATIC_MS / phases.length));
-  }
-  function stopPhases() { clearInterval(phaseTimer); }
+        // Atmosphere glow (peeche wala bada sphere)
+        const atmosphere = new THREE.Mesh(
+            new THREE.SphereGeometry(R * 1.16, 64, 64),
+            new THREE.ShaderMaterial({
+                vertexShader: `varying vec3 vN; void main(){ vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+                fragmentShader: `varying vec3 vN; void main(){
+                    float i = pow(max(0.64 - dot(vN, vec3(0.0, 0.0, 1.0)), 0.0), 2.6);
+                    gl_FragColor = vec4(0.05, 0.75, 0.95, 1.0) * i * 1.6; }`,
+                side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false
+            })
+        );
+        pivot.add(atmosphere);
 
-  function setBusy(on) {
-    switchBtn.disabled = on;
-    switchBtn.classList.toggle('is-verifying', on);
-    switchBtn.classList.toggle('is-pressed', on);
-    vaultWrap.classList.toggle('verifying', on);
-    btnLabel.textContent = on ? 'ACCESS SEQUENCE INITIATED' : 'INITIATE ACCESS';
-    if (on) { startPhases(); } else { stopPhases(); }
-  }
+        /* ================= Points (nodes / particles / pulse heads) ================= */
+        function pointMaterial(color, useFace) {
+            return new THREE.ShaderMaterial({
+                uniforms: { uTime: U.uTime, uScale: U.uScale, uColor: { value: new THREE.Color(color) }, uFace: { value: useFace ? 1 : 0 } },
+                vertexShader: `
+                    uniform float uTime; uniform float uScale; uniform float uFace;
+                    attribute float aSize; attribute float aPhase; attribute float aBase;
+                    varying float vA; varying float vFlick;
+                    void main(){
+                        vec4 wp = modelMatrix * vec4(position, 1.0);
+                        vec4 mv = viewMatrix * wp;
+                        float face = mix(1.0, smoothstep(-0.25, 0.55, dot(normalize(wp.xyz), normalize(cameraPosition))), uFace);
+                        vFlick = (0.7 + 0.3 * sin(uTime * (1.2 + aPhase * 1.5) + aPhase * 6.2831)) * aBase;
+                        vA = mix(0.15, 1.0, face);
+                        gl_PointSize = max(aSize * uScale / -mv.z, 1.0);
+                        gl_Position = projectionMatrix * mv;
+                    }`,
+                fragmentShader: `
+                    uniform vec3 uColor; varying float vA; varying float vFlick;
+                    void main(){
+                        float d = length(gl_PointCoord - 0.5);
+                        if (d > 0.5) discard;
+                        float core = smoothstep(0.5, 0.0, d);
+                        gl_FragColor = vec4(uColor * (1.0 + core * 0.8), core * core * vA * vFlick);
+                    }`,
+                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+            });
+        }
+        function makePoints(items, material) {
+            const n = items.length;
+            const pos = new Float32Array(n * 3), size = new Float32Array(n), phase = new Float32Array(n), base = new Float32Array(n);
+            items.forEach((it, i) => {
+                pos.set([it.v.x, it.v.y, it.v.z], i * 3);
+                size[i] = it.size; phase[i] = it.phase; base[i] = it.base;
+            });
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
+            geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+            geo.setAttribute('aBase', new THREE.BufferAttribute(base, 1));
+            const pts = new THREE.Points(geo, material);
+            pts.frustumCulled = false;
+            return pts;
+        }
 
-  /* ---------- success ---------- */
-  function grantAccess() {
-    setBusy(false);
-    vaultWrap.classList.remove('rejected', 'charging');
-    pulseCore();
-    setTimeout(function () {
-      vaultWrap.classList.add('is-open');
-      fog1.classList.add('is-pushed');
-      fog2.classList.add('is-pushed');
-      switchBtn.classList.add('is-granted');
-      showStatus('ok', 'ACCESS GRANTED', 'WELCOME, TRAVELER');
-      consoleEl.classList.add('is-leaving');
-    }, 350);
-    setTimeout(() => { window.location.href = REDIRECT_URL; }, 2600);
-  }
+        /* ================= Nodes (hubs + land par random) ================= */
+        const hubs = HUBS.map(([la, lo]) => ({ v: toVec(la, lo, R * 1.004), size: 0.085, phase: rnd(), base: 1 }));
+        const nodes = [];
+        while (nodes.length < CFG.nodes - hubs.length) {
+            const lat = Math.asin(2 * rnd() - 1) * 180 / Math.PI; // uniform sphere
+            const lon = rnd() * 360 - 180;
+            if (!isLand(lat, lon) && rnd() > 0.06) continue; // zyada nodes land par
+            nodes.push({ v: toVec(lat, lon, R * 1.004), size: 0.03 + rnd() * 0.03, phase: rnd(), base: 0.55 + rnd() * 0.45 });
+        }
+        spin.add(makePoints(nodes, pointMaterial(0x3ff3ff, true)));
+        spin.add(makePoints(hubs, pointMaterial(0x8ffcff, true)));
 
-  /* ---------- rejection (401) ---------- */
-  function denyAccess(message) {
-    setBusy(false);
-    flashBlack.classList.add('is-flashing');
-    setTimeout(() => flashBlack.classList.remove('is-flashing'), 200);
-    flashRed.classList.add('is-visible');
-    vaultWrap.classList.add('rejected');
-    vaultWrap.classList.remove('charging');
-    showStatus('danger', 'ACCESS DENIED', (message || 'THE KEY WAS REJECTED') + ' · THE VAULT REMAINS SEALED');
-    shakeConsole();
-    setTimeout(function () {
-      vaultWrap.classList.remove('rejected');
-      flashRed.classList.remove('is-visible');
-      hideStatus();
-    }, 3000);
-  }
+        /* ================= Network arcs (Bezier curves) ================= */
+        const arcs = [];
+        {
+            const SEG = 48, pos = [], tt = [], par = [];
+            const pickHub = () => hubs[(rnd() * hubs.length) | 0];
+            const pickNode = () => nodes[(rnd() * nodes.length) | 0];
+            for (let tries = 0; arcs.length < CFG.arcs && tries < 6000; tries++) {
+                const a = rnd() < 0.7 ? pickHub() : pickNode();
+                const b = rnd() < 0.55 ? pickHub() : pickNode();
+                const ang = a.v.angleTo(b.v);
+                if (ang < 0.4 || ang > 2.7) continue;
+                const h = R * (1.0 + ang * 0.34 * (0.8 + rnd() * 0.5)); // distance ke hisaab se arc height
+                const c1 = a.v.clone().lerp(b.v, 0.25).normalize().multiplyScalar(h);
+                const c2 = a.v.clone().lerp(b.v, 0.75).normalize().multiplyScalar(h);
+                const curve = new THREE.CubicBezierCurve3(a.v.clone(), c1, c2, b.v.clone());
+                const off = rnd(), spd = 0.06 + rnd() * 0.12, br = 0.35 + rnd() * 0.65;
+                const pts = curve.getPoints(SEG);
+                for (let i = 0; i < SEG; i++) {
+                    pos.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z);
+                    tt.push(i / SEG, (i + 1) / SEG);
+                    par.push(off, spd, br, off, spd, br);
+                }
+                arcs.push({ curve, off, spd });
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('aT', new THREE.Float32BufferAttribute(tt, 1));
+            geo.setAttribute('aPar', new THREE.Float32BufferAttribute(par, 3));
+            const mat = new THREE.ShaderMaterial({
+                uniforms: { uTime: U.uTime },
+                vertexShader: `
+                    attribute float aT; attribute vec3 aPar;
+                    varying float vT; varying float vOff; varying float vSpd; varying float vBr; varying float vFace;
+                    void main(){
+                        vT = aT; vOff = aPar.x; vSpd = aPar.y; vBr = aPar.z;
+                        vec4 wp = modelMatrix * vec4(position, 1.0);
+                        vFace = smoothstep(-0.25, 0.55, dot(normalize(wp.xyz), normalize(cameraPosition)));
+                        gl_Position = projectionMatrix * viewMatrix * wp;
+                    }`,
+                fragmentShader: `
+                    uniform float uTime;
+                    varying float vT; varying float vOff; varying float vSpd; varying float vBr; varying float vFace;
+                    void main(){
+                        float d = fract(uTime * vSpd + vOff - vT);
+                        float pulse = exp(-d * 12.0);
+                        float ends = smoothstep(0.0, 0.06, vT) * smoothstep(1.0, 0.94, vT);
+                        float a = (0.20 + pulse * 1.1) * vBr * ends * mix(0.15, 1.0, vFace);
+                        gl_FragColor = vec4(mix(vec3(0.0, 0.75, 0.95), vec3(0.6, 1.0, 1.0), pulse), a);
+                    }`,
+                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+            });
+            const lines = new THREE.LineSegments(geo, mat);
+            lines.frustumCulled = false;
+            spin.add(lines);
+        }
 
-  function validationFailed(errors) {
-    setBusy(false);
-    if (errors && errors.email) setFieldError(emailField, emailMsg, 'INVALID IDENTITY');
-    if (errors && errors.password) setFieldError(passField, passMsg, 'SECURITY KEY REQUIRED');
-    shakeConsole();
-  }
+        // Travelling pulse heads (arc par chalne wale chamakdaar dots)
+        const pulseCount = Math.min(CFG.pulses, arcs.length);
+        const pulseItems = Array.from({ length: pulseCount }, () => ({ v: new THREE.Vector3(), size: 0.075, phase: rnd(), base: 1 }));
+        const pulsePts = makePoints(pulseItems, pointMaterial(0xbffcff, true));
+        spin.add(pulsePts);
+        const tmpV = new THREE.Vector3();
+        function updatePulses(time) {
+            const pa = pulsePts.geometry.attributes.position, ba = pulsePts.geometry.attributes.aBase;
+            for (let k = 0; k < pulseCount; k++) {
+                const a = arcs[k];
+                const t = (((time * a.spd + a.off) % 1) + 1) % 1;
+                a.curve.getPoint(t, tmpV);
+                pa.setXYZ(k, tmpV.x, tmpV.y, tmpV.z);
+                ba.setX(k, Math.sin(Math.PI * t));
+            }
+            pa.needsUpdate = true; ba.needsUpdate = true;
+        }
 
-  function connectionInterrupted(sub) {
-    setBusy(false);
-    vaultWrap.classList.remove('charging');
-    showStatus('warn', 'CONNECTION INTERRUPTED', sub || 'THE VAULT COULD NOT VERIFY YOUR IDENTITY.');
-    shakeConsole();
-    setTimeout(hideStatus, 5000);
-  }
+        /* ================= Orbit rings + satellites ================= */
+        const orbits = [];
+        [[3.95, 0.9, 0.2, 0.18], [4.5, -0.6, 0.5, -0.12], [5.1, 0.25, -0.7, 0.08]].forEach(([r, tx, tz, sp]) => {
+            const tilt = new THREE.Group(); tilt.rotation.set(tx, 0, tz);
+            const spinner = new THREE.Group();
+            const ringPts = [];
+            for (let i = 0; i < 256; i++) { const a = i / 256 * Math.PI * 2; ringPts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r)); }
+            const ring = new THREE.LineLoop(
+                new THREE.BufferGeometry().setFromPoints(ringPts),
+                new THREE.LineBasicMaterial({ color: 0x1fd6e8, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false })
+            );
+            const sat = makePoints([{ v: new THREE.Vector3(r, 0, 0), size: 0.11, phase: rnd(), base: 1 }], pointMaterial(0x9ffcff, false));
+            spinner.add(sat); tilt.add(ring); tilt.add(spinner); world.add(tilt);
+            orbits.push({ spinner, speed: sp });
+        });
 
-  /* ---------- submit ---------- */
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    if (isSubmitting) return;
-    hideStatus();
-    if (!validateClientSide()) return;
+        /* ================= Ambient particles ================= */
+        const dust = [];
+        for (let i = 0; i < CFG.particles; i++) {
+            const r = 4.2 + rnd() * 5.5;
+            const u = rnd() * 2 - 1, th = rnd() * Math.PI * 2, s = Math.sqrt(1 - u * u);
+            dust.push({ v: new THREE.Vector3(r * s * Math.cos(th), r * u * 0.8, r * s * Math.sin(th)), size: 0.02 + rnd() * 0.04, phase: rnd(), base: 0.25 + rnd() * 0.6 });
+        }
+        const dustPts = makePoints(dust, pointMaterial(0x59c9ff, false));
+        world.add(dustPts);
 
-    isSubmitting = true;
-    setBusy(true);
+        /* ================= Post-processing (bloom) ================= */
+        let composer = null;
+        if (THREE.EffectComposer && THREE.UnrealBloomPass && THREE.RenderPass) {
+            composer = new THREE.EffectComposer(renderer);
+            composer.setPixelRatio(CFG.pixelRatio);
+            composer.addPass(new THREE.RenderPass(scene, camera));
+            composer.bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), isMobile ? 0.6 : 0.8, 0.55, 0.12);
+            composer.addPass(composer.bloom);
+        }
 
-    const startedAt = Date.now();
-    const payload = { email: emailInput.value.trim(), password: passInput.value };
+        /* ================= Resize / camera fit ================= */
+        let baseDist = 12, zoom = 1, zoomTarget = 1;
+        function resize() {
+            const w = innerWidth, h = innerHeight;
+            renderer.setSize(w, h, false);
+            if (composer) composer.setSize(w, h);
+            camera.aspect = w / h;
+            const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+            // Desktop par globe ~74% height; portrait par ~86% width
+            const visH = Math.max((2 * R) / 0.74, (2 * R / 0.86) / camera.aspect);
+            baseDist = visH / (2 * tanH);
+            U.uScale.value = (h * CFG.pixelRatio) / (2 * tanH);
+            camera.updateProjectionMatrix();
+        }
+        addEventListener('resize', resize);
+        resize();
 
-    fetch(LOGIN_URL, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-CSRF-TOKEN': csrfToken,
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: JSON.stringify(payload)
-    })
-    .then(function (response) {
-      const remaining = Math.max(0, MIN_CINEMATIC_MS - (Date.now() - startedAt));
-      return new Promise(resolve => setTimeout(() => resolve(response), remaining));
-    })
-    .then(function (response) {
-      if (response.status === 200) { grantAccess(); return; }                       // ← SUCCESS HANDLER
-      if (response.status === 401) {                                                // ← 401 ERROR HANDLER
-        return response.json().catch(() => ({})).then(d => denyAccess(d.message));
-      }
-      if (response.status === 422) {
-        return response.json().catch(() => ({})).then(d => validationFailed(d.errors));
-      }
-      if (response.status === 419) {
-        connectionInterrupted('Session expired. Refreshing…');
-        setTimeout(() => window.location.reload(), 1800);
-        return;
-      }
-      connectionInterrupted();
-    })
-    .catch(function () { connectionInterrupted(); })
-    .finally(function () { isSubmitting = false; });
-  });
+        /* ================= Interaction (drag + wheel) ================= */
+        let dragging = false, lastX = 0, lastY = 0, dragDX = 0, inertia = 0;
+        const onDown = e => { dragging = true; lastX = e.clientX; lastY = e.clientY; canvas.classList.add('dragging'); canvas.setPointerCapture(e.pointerId); };
+        const onMove = e => {
+            if (!dragging) return;
+            dragDX += e.clientX - lastX;
+            pivot.rotation.x = THREE.MathUtils.clamp(pivot.rotation.x + (e.clientY - lastY) * 0.005, -0.9, 0.9);
+            lastX = e.clientX; lastY = e.clientY;
+        };
+        const onUp = e => { dragging = false; canvas.classList.remove('dragging'); try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} };
+        const onWheel = e => { e.preventDefault(); zoomTarget = THREE.MathUtils.clamp(zoomTarget + e.deltaY * 0.0009, 0.72, 1.5); };
+        canvas.addEventListener('pointerdown', onDown);
+        canvas.addEventListener('pointermove', onMove);
+        canvas.addEventListener('pointerup', onUp);
+        canvas.addEventListener('pointercancel', onUp);
+        canvas.addEventListener('wheel', onWheel, { passive: false });
 
-})();
-</script>
+        /* ================= Animation loop ================= */
+        const clock = new THREE.Clock();
+        let time = 0, raf = 0;
+        const timeScale = reduceMotion ? 0 : 1;
+
+        function frame() {
+            raf = requestAnimationFrame(frame);
+            const dt = Math.min(clock.getDelta(), 0.05);
+            time += dt * timeScale;
+            U.uTime.value = time;
+
+            // Rotation: drag + inertia + auto-rotate
+            if (dragging) {
+                const v = (dragDX * 0.006) / Math.max(dt, 0.001);
+                inertia = THREE.MathUtils.lerp(inertia, v, 0.35);
+                spin.rotation.y += dragDX * 0.006;
+                dragDX = 0;
+            } else {
+                inertia *= Math.pow(0.02, dt); // smooth decay
+                spin.rotation.y += inertia * dt + CFG.autoSpeed * dt * timeScale;
+            }
+
+            orbits.forEach(o => { o.spinner.rotation.y += o.speed * dt * timeScale; });
+            dustPts.rotation.y += 0.012 * dt * timeScale;
+            updatePulses(time);
+
+            // Smooth zoom
+            zoom += (zoomTarget - zoom) * Math.min(1, dt * 5);
+            camera.position.set(0, 0, baseDist * zoom);
+            camera.lookAt(0, 0, 0);
+
+            composer ? composer.render() : renderer.render(scene, camera);
+        }
+        frame();
+
+        /* ================= Cleanup ================= */
+        function dispose() {
+            cancelAnimationFrame(raf);
+            removeEventListener('resize', resize);
+            canvas.removeEventListener('pointerdown', onDown);
+            canvas.removeEventListener('pointermove', onMove);
+            canvas.removeEventListener('pointerup', onUp);
+            canvas.removeEventListener('pointercancel', onUp);
+            canvas.removeEventListener('wheel', onWheel);
+            scene.traverse(o => {
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); }
+            });
+            renderer.dispose();
+        }
+        addEventListener('pagehide', dispose, { once: true });
+    })();
+    </script>
+    @endverbatim
+
+    <script>
+    (() => {
+        const password = document.getElementById('password');
+        const toggle = document.getElementById('passwordToggle');
+        const form = document.getElementById('fleetLoginForm');
+        const button = document.getElementById('accessButton');
+        const label = button && button.querySelector('.button-label');
+        if (toggle && password) {
+            toggle.addEventListener('click', () => {
+                const visible = password.type === 'password';
+                password.type = visible ? 'text' : 'password';
+                toggle.classList.toggle('is-visible', visible);
+                toggle.setAttribute('aria-pressed', String(visible));
+                toggle.setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
+                password.focus({ preventScroll: true });
+            });
+        }
+        if (form && button) {
+            form.addEventListener('submit', () => {
+                if (!form.checkValidity()) return;
+                button.disabled = true;
+                button.classList.add('is-loading');
+                if (label) label.textContent = 'AUTHENTICATING FLEET ACCESS';
+            });
+        }
+        document.querySelectorAll('.input-shell input').forEach(input => {
+            const update = () => input.closest('.input-shell')?.classList.toggle('has-value', input.value.length > 0);
+            input.addEventListener('input', update);
+            update();
+        });
+    })();
+    </script>
+
 </body>
 </html>

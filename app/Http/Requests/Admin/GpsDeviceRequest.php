@@ -27,6 +27,7 @@ class GpsDeviceRequest extends FormRequest
             'vehicle_id' => ['nullable', 'exists:vehicles,id', Rule::unique('gps_devices', 'vehicle_id')->ignore($device?->id)],
             'new_vehicle.registration_number' => ['required_with:new_vehicle.name', 'nullable', 'string', 'max:255', 'unique:vehicles,registration_number'],
             'new_vehicle.name' => ['required_with:new_vehicle.registration_number', 'nullable', 'string', 'max:255'],
+            'new_vehicle.owner_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'new_vehicle.status' => ['nullable', Rule::in(['active', 'inactive', 'maintenance'])],
             'details' => ['nullable', 'array'], 'configuration' => ['required', 'array'],
             'configuration.transport' => ['required', Rule::in(['tcp', 'udp'])],

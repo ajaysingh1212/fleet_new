@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Services\Gps\HardwareConnectionState;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -36,7 +38,16 @@ class GpsDevice extends Model
 
     public function getIsOnlineAttribute(): bool
     {
-        return $this->status === 'active' && $this->last_packet_at?->gt(now()->subSeconds(config('gps.idle_seconds')))
-            && (app(\App\Services\Gps\HardwareConnectionState::class)->snapshot($this->id)['connection_connected'] ?? true);
+        $presence = app(HardwareConnectionState::class)->snapshot($this->id);
+        $lastPacket = $this->last_packet_at;
+        if (! empty($presence['connection_last_packet_at'])) {
+            $received = CarbonImmutable::parse($presence['connection_last_packet_at']);
+            if (! $lastPacket || $received->gt($lastPacket)) {
+                $lastPacket = $received;
+            }
+        }
+
+        return $this->status === 'active' && $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')))
+            && ($presence['connection_connected'] ?? true);
     }
 }

@@ -4,6 +4,10 @@
 @section('page-title', 'User Dashboard')
 
 @section('content')
+    <div id="dashboard-map-tab">@include('dashboards.fleet-map')</div>
+    <aside class="offcanvas offcanvas-end fleet-information-drawer" id="dashboard-information-tab" tabindex="-1" aria-labelledby="fleet-information-title" data-bs-scroll="true" data-bs-backdrop="false">
+        <div class="offcanvas-header"><h2 class="offcanvas-title h5" id="fleet-information-title">Information &amp; activity</h2><button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close information and activity"></button></div>
+        <div class="offcanvas-body">
     <div class="tracker-hero-card tracker-hero-card-user mb-4">
         <div class="row align-items-center g-4">
             <div class="col-lg-8">
@@ -156,4 +160,5 @@
             </div>
         </div>
     </div>
+    </div></aside>
 @endsection
