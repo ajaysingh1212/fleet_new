@@ -53,15 +53,15 @@ test('GPS expires independently of a live heartbeat instead of labeling a 139-se
     assert.match(display.gps, /Delayed.*139s old/);
 });
 
-test('an explicitly closed device socket stays Offline despite recent or replayed packets', () => {
+test('device last-seen is independent of a closed socket and reconnect races preserve TCP identity', () => {
     const now = Date.parse('2026-10-23T10:00:00Z');
     const p = {device_id: 3, vehicle_id: null, authorization: 'active',
         last_packet_at: new Date(now).toISOString(), recorded_at: new Date(now - 1800000).toISOString(),
         speed: 19, connection_connected: false, connection_observed_at: new Date(now).toISOString()};
-    assert.equal(fleetState(p, now), 'offline');
-    assert.equal(fleetPresentation(p, now).connection, 'Offline');
+    assert.equal(fleetState(p, now), 'stale_gps');
+    assert.equal(fleetPresentation(p, now).connection, 'Online');
     const old = {...p, connection_connected: true, connection_observed_at: new Date(now - 1000).toISOString()};
-    assert.equal(fleetPresentation(mergeFleetUpdate(p, old), now).connection, 'Offline');
+    assert.equal(fleetPresentation(mergeFleetUpdate(p, old), now).tcp, 'Disconnected / reconnecting');
     const reconnected = {...p, connection_connected: true, connection_observed_at: new Date(now + 1000).toISOString()};
     assert.equal(fleetPresentation(mergeFleetUpdate(p, reconnected), now + 1000).connection, 'Online');
 });
@@ -114,8 +114,8 @@ test('receiver activity stays online while queued storage is behind and brief pe
         reconnect_seconds: 30, recorded_at: new Date(now - 5000).toISOString(), speed: 21, acc: true};
     assert.equal(fleetPresentation(p, now).connection, 'Online');
     assert.equal(fleetState(p, now), 'moving');
-    assert.equal(fleetPresentation({...p, connection_connected: false}, now + 10000).connection, 'Reconnecting');
-    assert.equal(fleetState({...p, connection_connected: false}, now + 10000), 'offline');
-    assert.equal(fleetPresentation({...p, connection_connected: false}, now + 31000).connection, 'Offline');
+    assert.equal(fleetPresentation({...p, connection_connected: false}, now + 10000).connection, 'Online');
+    assert.equal(fleetState({...p, connection_connected: false}, now + 10000), 'moving');
+    assert.equal(fleetPresentation({...p, connection_connected: false}, now + 181000).connection, 'Offline');
     assert.equal(fleetPresentation({...p, connection_connected: false, authorization: 'blocked'}, now).connection, 'blocked');
 });

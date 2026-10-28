@@ -26,7 +26,7 @@ export class HardwareMarkerMotion {
         return {position, velocity: speed};
     }
 
-    push(position, timestamp) {
+    push(position, timestamp, {onFrame = null} = {}) {
         if (!Number.isFinite(timestamp) || timestamp <= this.timestamp
             || !position.every(Number.isFinite)) return;
         const time = this.now();
@@ -42,6 +42,7 @@ export class HardwareMarkerMotion {
                 ? Math.sign(delta)*Math.min(Math.abs(v), 3*Math.abs(delta)/duration) : 0;
         });
         this.segment = {from: current.position, to, velocity, start: time, duration};
+        this.onFrame = onFrame;
         this.timestamp = timestamp;
         this.lastArrival = time;
         if (this.frame === null) this.frame = this.request(next => this.step(next));
@@ -51,6 +52,7 @@ export class HardwareMarkerMotion {
         this.frame = null;
         if (!this.segment) return;
         this.marker.setLatLng(this.sample(time).position);
+        const notify = this.onFrame; this.onFrame = null; notify?.();
         if (time - this.segment.start < this.segment.duration) {
             this.frame = this.request(next => this.step(next));
         } else this.segment = null;
@@ -60,5 +62,6 @@ export class HardwareMarkerMotion {
         if (this.frame !== null) this.cancel(this.frame);
         this.frame = null;
         this.segment = null;
+        this.onFrame = null;
     }
 }

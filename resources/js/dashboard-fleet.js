@@ -7,6 +7,7 @@ import {HardwareMarkerMotion} from './hardware-marker-motion.js';
 import {fleetState, fleetPresentation, mergeFleetUpdate} from './hardware-gps-motion.js';
 import {liveGeofenceWarnings, warningLabel} from './fleet-geofence-alerts.js';
 import {fleetKey, fleetLabel, streetDetailZoom} from './dashboard-fleet-model.js';
+import {browserReceived, markerDrawn} from './gps-pipeline-metrics.js';
 import {stateName, insideFeature, hasPosition, labelPosition} from './dashboard-map-geometry.js';
 
 const make = (tag, text, className) => {
@@ -90,7 +91,7 @@ export function initDashboardFleet() {
             'Coordinates': hasPosition(p) ? `${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}` : 'Awaiting first GPS fix',
             'GPS timestamp': date(p.recorded_at), 'Server received': date(p.received_at),
             'Last communication': date(p.last_packet_at), 'Ignition report': date(p.acc_reported_at),
-            'TCP link': p.connection_connected === false ? 'Disconnected / awaiting reconnect' : p.connection_connected === true ? 'Connected' : 'Not reported',
+            'TCP link': presentation.tcp,
             'Device delivery delay': p.received_at && p.recorded_at ? `${Math.max(0, Math.round((Date.parse(p.received_at) - Date.parse(p.recorded_at)) / 1000))} s` : 'Not reported',
             'Server queue delay': p.queue_delay_ms == null ? 'Not reported' : `${p.queue_delay_ms} ms`,
             'Protocol / model': [p.protocol, p.model].filter(Boolean).join(' / ')};
@@ -139,7 +140,7 @@ export function initDashboardFleet() {
         for (const p of list) {
             warnings.set(fleetKey(p), liveGeofenceWarnings(p, zones, confirmed.filter(a => Number(a.gps_device_id) === Number(p.device_id))));
             const connection = fleetPresentation(p).connection;
-            if (connection === 'Online') counts.online++;
+            if (connection === 'Online') {counts.online++; if (p.connection_connected === false) counts.reconnecting++;}
             else if (connection === 'Reconnecting') counts.reconnecting++;
             else counts.offline++;
             if (fleetState(p) === 'moving') counts.moving++;
@@ -228,15 +229,16 @@ export function initDashboardFleet() {
             marker.on('click', () => {const current = vehicles.get(fleetKey(p)); if (current) select(current);});
             markers.set(fleetKey(p), marker); motions.set(fleetKey(p), new HardwareMarkerMotion(marker));
             motions.get(fleetKey(p)).timestamp = Date.parse(p.recorded_at);
+            requestAnimationFrame(() => markerDrawn(p));
         } else if (Date.parse(p.recorded_at) > Date.parse(previous?.recorded_at)) {
             if (fleetState(p) === 'moving' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-                motions.get(fleetKey(p)).push([p.latitude, p.longitude], Date.parse(p.recorded_at));
-            else {motions.get(fleetKey(p)).stop(); marker.setLatLng([p.latitude, p.longitude]); motions.get(fleetKey(p)).timestamp = Date.parse(p.recorded_at);}
+                motions.get(fleetKey(p)).push([p.latitude, p.longitude], Date.parse(p.recorded_at), {onFrame: () => markerDrawn(p)});
+            else {motions.get(fleetKey(p)).stop(); marker.setLatLng([p.latitude, p.longitude]); motions.get(fleetKey(p)).timestamp = Date.parse(p.recorded_at); requestAnimationFrame(() => markerDrawn(p));}
         }
     }
     function onLocation(p) {
         if (stopped || !vehicles.has(fleetKey(p)) || vehicles.get(fleetKey(p)).device_id !== p.device_id) return;
-        update(p); render();
+        update(browserReceived(p)); render();
     }
     function onAlert(payload) {
         if (stopped || ![...vehicles.values()].some(p => Number(p.device_id) === Number(payload.device_id))) return;
@@ -252,7 +254,7 @@ export function initDashboardFleet() {
         for (const [name] of channels) if (!wanted.has(name)) {echo.leave(name); channels.delete(name);}
         for (const name of wanted) if (!channels.has(name)) {
             const channel = echo.private(name).listen('.hardware.location.updated', onLocation).listen('.vehicle.geofence.alert', onAlert)
-                .subscribed(() => {socketLive = true; connectionStatus();})
+                .subscribed(() => {socketLive = true; connectionStatus(); sync();})
                 .error(() => {socketLive = false; connectionStatus();});
             channels.set(name, channel);
         }

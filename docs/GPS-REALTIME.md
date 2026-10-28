@@ -31,13 +31,13 @@ The default live-first path is:
    A separate worker writes deduplicated location/event history and does not
    broadcast it again. Browser rendering is never a storage prerequisite.
 
-`HardwarePacketLive` broadcasts synchronously **inside the live worker**, not
-inside the TCP read loop. Reverb calls have a bounded timeout. If Reverb or the
+`HardwarePacketLive` is queued on `gps-broadcasts`, outside both the TCP
+read loop and live projection worker. Reverb calls have a bounded timeout. If Reverb or the
 live cache is unavailable, history is still queued. If history enqueue fails,
 the durable input job retries; SQL uniqueness guards repeated deliveries.
 Failed jobs must be monitored/replayed if retries are exhausted.
 
-Server publish precedes scheduling the history write. This does not guarantee
+Broadcast scheduling precedes scheduling the history write. This does not guarantee
 that every browser physically paints before SQL commits: browsers/network links
 can be slow or closed. No browser acknowledgement gates storage. This separation
 removes GPS history write/read latency from the map's live update path while
@@ -55,22 +55,12 @@ connection warning while bounded reconciliation continues.
 
 ## Parking versus GPS
 
-Device connectivity now uses receiver-owned session presence as well as the
-communication timeout. A TCP close marks that session disconnected immediately;
-the bounded five-second reconciliation carries it to open maps even without a
-new position. Delayed persistence/live jobs cannot reopen it. Multiple sessions
-are tracked independently so closing an old socket cannot disconnect a newer
-one. An unobserved disconnect still expires at the communication timeout. SQL
-sessions supply the fallback for installations upgrading without presence cache.
-GPS age remains separate: an online socket may be uploading old GPS history.
-
-Fresh measured movement above 1.8 km/h takes precedence unless a strictly newer
-ACC-OFF heartbeat reports parking. Otherwise a current
-ACC-OFF report on an online device is displayed as Parked, even if its last
-coordinate is old or absent. GPS age/no-fix remains a separate warning; a parked
-icon at an old coordinate is not proof of the current physical location.
-Expired ignition becomes Unknown, and expired communication becomes Offline.
-An out-of-order older heartbeat cannot replace a newer ignition report.
+Availability uses the last authenticated packet (180 seconds by default),
+independently of receiver-owned TCP presence. A TCP close updates socket state
+immediately but does not instantly mark a recently reporting device Offline.
+Multiple sessions are tracked independently; an old close cannot disconnect a
+newer session. An open socket does not extend packet freshness indefinitely.
+GPS age remains separate: an online tracker may upload old GPS history.
 
 ## Local Windows operation
 
@@ -82,7 +72,7 @@ previous logs before starting replacements. It starts:
 - Reverb on `127.0.0.1:8080` using the existing application credentials.
 - A low-latency database input worker for `gps-live` (100 ms idle wait).
 - An independent database history worker for `gps-persist`.
-- A `gps-broadcasts` worker for compatibility with the legacy persisted event path.
+- A dedicated `gps-broadcasts` worker for current-state publication.
 - The registered PT06 diagnostic receiver on TCP 9000 when that port is free.
 
 The script records its process IDs/start times and avoids starting duplicate
@@ -163,18 +153,32 @@ the TCP receiver running as well.
 
 Receiver presence records authenticated receive time separately from queued
 history, so a persistence backlog cannot make an active receiver look offline.
-A confirmed closed socket still has `online=false`. Its display says
-`Reconnecting` for 30 seconds after the last authenticated receive, then
-`Offline`; TCP state remains visible separately. Freshness is based on device
+A confirmed closed socket has `connection_connected=false`. Availability
+remains based on the last authenticated packet; TCP reconnecting is separate.
+`GPS_SOCKET_IDLE_SECONDS=0` disables authenticated socket idle closure;
+unauthenticated login still has a deadline. Freshness is based on device
 GPS time, never on job completion time. `Device delivery delay` and
 `Server queue delay` distinguish cellular/device buffering from server backlog.
 TCP listeners enable `tcp_nodelay`, and ACKs are sent in the same read-loop pass.
 
 Observed on 28 October 2026 for the reported tracker: no queued or failed GPS
-jobs, live jobs around 12–30 ms, repeated `peer_closed`, and retransmitted GPS
-fixes several minutes older than receipt. This is evidence of device/upstream
-buffering and connection loss, not evidence of a queue backlog. Backend changes
-cannot recreate GPS fixes that have not reached the receiver.
+jobs, live jobs around 12â€“30 ms, repeated `peer_closed`, and retransmitted GPS
+fixes several minutes older than receipt. Old incoming fixes and peer closure
+were observed without a queue backlog. EOF alone does not establish why the
+peer closed or rule out an ACK/protocol issue.
 
 References: [Laravel workers and job timeouts](https://laravel.com/docs/12.x/queues),
 [PHP TCP stream context options](https://www.php.net/manual/en/context.socket.php).
+
+
+## Measured audit and operations
+
+See [the measured audit](GPS-REALTIME-AUDIT-2026-10-28.md) for fixes, latency
+distributions, limitations, deployment and rollback. Run `php artisan gps:health
+--imei=<15-digit-imei> --probe-broadcast` for receiver heartbeat, bounded device
+state, queues, worker pool and signed publish acceptance. Browser samples stay
+local at `window.__gpsPipelineMetrics`. Pipeline phase logs contain metadata,
+not raw packets or secrets. `GPS_TRACE_ENABLED=false` disables phase logs.
+`php artisan gps:workers --stop` lets active GPS workers finish safely.
+Windows PHP here has no PCNTL; hard job interruption needs a suitable production
+runtime. Linux service examples are under `deploy/gps/`.

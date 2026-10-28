@@ -15,7 +15,11 @@ return [
     'max_clients' => 256,
     'max_buffer' => 65536,
     'max_frame' => 16384,
-    'idle_seconds' => 180,
+    // Device availability is last authenticated receive time, not TCP lifetime.
+    'idle_seconds' => max(30, (int) env('GPS_LAST_SEEN_SECONDS', 180)),
+    'socket_idle_seconds' => max(0, (int) env('GPS_SOCKET_IDLE_SECONDS', 0)),
+    'login_timeout_seconds' => max(5, (int) env('GPS_LOGIN_TIMEOUT_SECONDS', 15)),
+    'trace_enabled' => (bool) env('GPS_TRACE_ENABLED', true),
     'fresh_seconds' => (int) env('GPS_FRESH_SECONDS', 15),
     'reconnect_seconds' => (int) env('GPS_RECONNECT_SECONDS', 30),
     'pt06_location_ack' => (bool) env('GPS_PT06_LOCATION_ACK', true),

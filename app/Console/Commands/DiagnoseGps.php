@@ -11,6 +11,7 @@ use App\Services\Gps\Gateway\Protocols\Gt06;
 use App\Services\Gps\Gateway\Protocols\Pt06;
 use App\Services\Gps\Gateway\TcpListenerLease;
 use App\Services\Gps\HardwareConnectionState;
+use App\Services\Gps\HardwareTelemetry;
 use App\Services\Gps\LocalHardwareRecorder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -68,6 +69,7 @@ class DiagnoseGps extends Command
             'alarms' => 0, 'lbs_packets' => 0, 'information_packets' => 0, 'unsupported_packets' => 0];
         $started = time();
         $lastStatus = 0;
+        $lastHealth = 0;
         $lastData = null;
         $lastFix = null;
         $deviceStates = [];
@@ -80,6 +82,7 @@ class DiagnoseGps extends Command
             }
             $this->record('DISCONNECTED', ['peer' => $clients[$id]['peer'], 'imei' => $clients[$id]['imei'], 'reason' => $reason,
                 'received_bytes' => $clients[$id]['bytes'], 'packets' => $clients[$id]['packets']]);
+            HardwareTelemetry::phase('socket_closed', ['device_id' => $clients[$id]['device_id'], 'session_id' => $clients[$id]['session_id'], 'reason' => $reason]);
             if ($this->option('persist')) {
                 try {
                     $presenceDeviceId = $clients[$id]['imei'] ? DB::table('gps_devices')->where('identifier', $clients[$id]['imei'])->value('id') : null;
@@ -108,6 +111,18 @@ class DiagnoseGps extends Command
         };
         try {
             while ($seconds === 0 || time() - $started < $seconds) {
+                if (time() - $lastHealth >= 5 && $this->option('persist')) {
+                    foreach ($clients as $client) {
+                        if ($client['device_id']) {
+                            try {
+                                app(HardwareConnectionState::class)->keepAlive($client['device_id'], $client['session_id']);
+                            } catch (Throwable) {
+                            }
+                        }
+                    }
+                    HardwareTelemetry::receiver($port, count($clients), count(array_filter($clients, fn ($client) => $client['imei'] !== null)));
+                    $lastHealth = time();
+                }
                 $read = [$server];
                 $write = [];
                 $except = null;
@@ -134,15 +149,17 @@ class DiagnoseGps extends Command
                         stream_set_blocking($socket, false);
                         $clients[(int) $socket] = ['socket' => $socket, 'peer' => $peer, 'in' => '', 'out' => '',
                             'session_id' => (string) Str::uuid(), 'connected_at' => now()->utc()->format('Y-m-d H:i:s'),
-                            'imei' => null, 'activity' => time(), 'bytes' => 0, 'packets' => 0, 'window' => time(), 'window_bytes' => 0];
+                            'imei' => null, 'device_id' => null, 'acks' => [], 'activity' => time(), 'bytes' => 0, 'packets' => 0, 'window' => time(), 'window_bytes' => 0];
                         $totals['connections']++;
                         $this->record('CONNECTED', ['peer' => $peer, 'connected_now' => count($clients)]);
+                        HardwareTelemetry::phase('socket_opened', ['session_id' => $clients[(int) $socket]['session_id']]);
 
                         continue;
                     }
                     $id = (int) $socket;
                     try {
-                        $bytes = @fread($socket, 8192);
+                        // Bound bytes per turn rather than discard a valid burst.
+                        $bytes = @fread($socket, 128);
                         if ($bytes === false || ($bytes === '' && feof($socket))) {
                             $close($id, 'peer_closed');
 
@@ -152,6 +169,8 @@ class DiagnoseGps extends Command
                             continue;
                         }
                         $lastData = now()->timezone('Asia/Kolkata')->format('Y-m-d H:i:s T');
+                        $receivedAt = HardwareTelemetry::stamp();
+                        $readStarted = hrtime(true);
                         $totals['reads']++;
                         $totals['bytes'] += strlen($bytes);
                         $clients[$id]['bytes'] += strlen($bytes);
@@ -171,6 +190,9 @@ class DiagnoseGps extends Command
                         }
                         $frames = 0;
                         while (($frame = $framer->extract($clients[$id]['in'])) !== null) {
+                            $traceId = bin2hex(random_bytes(8));
+                            HardwareTelemetry::phase('packet_received', ['trace_id' => $traceId, 'session_id' => $clients[$id]['session_id'],
+                                'received_at' => $receivedAt, 'bytes' => strlen($frame)]);
                             if (++$frames > 64) {
                                 throw new InvalidArgumentException('frame_limit');
                             }
@@ -195,7 +217,10 @@ class DiagnoseGps extends Command
                                 continue;
                             }
                             try {
-                                $packet = $protocol->decode($frame, $clients[$id]['imei'] !== null);
+                                $binaryLogin = $framer->type($frame) === '01';
+                                $packet = $protocol->decode($frame, $clients[$id]['imei'] !== null && ! $binaryLogin);
+                                HardwareTelemetry::phase('packet_parsed', ['trace_id' => $traceId, 'type' => $packet->type,
+                                    'parsed_at' => HardwareTelemetry::stamp(), 'duration_ms' => (hrtime(true) - $readStarted) / 1000000]);
                             } catch (InvalidArgumentException $e) {
                                 $this->record('PACKET_NOT_DECODED', ['peer' => $clients[$id]['peer'], 'type' => $framer->type($frame),
                                     'bytes' => strlen($frame), 'reason' => $e->getMessage(),
@@ -205,6 +230,9 @@ class DiagnoseGps extends Command
                                 continue;
                             }
                             if ($packet->identifier !== null) {
+                                if ($clients[$id]['imei'] !== null && $packet->identifier !== $clients[$id]['imei']) {
+                                    throw new InvalidArgumentException('device_identity_changed');
+                                }
                                 if ($this->option('registered') && app(LocalHardwareRecorder::class)->allows($packet->identifier, $profile, $packet->version)) {
                                     if (! in_array($packet->identifier, $imeis, true)) {
                                         $imeis[] = $packet->identifier;
@@ -222,9 +250,19 @@ class DiagnoseGps extends Command
                                 $this->record('PACKET_DETAILS', ['peer' => $clients[$id]['peer'], 'imei' => $packet->identifier, ...$packetDetails]);
                             }
                             if ($this->option('persist')) {
-                                app(LocalHardwareRecorder::class)->record($packet, $frame, $clients[$id]['imei'], $profile,
-                                    $clients[$id]['session_id'], $clients[$id]['connected_at'], $clients[$id]['peer']);
+                                $clients[$id]['device_id'] = app(LocalHardwareRecorder::class)->record($packet, $frame, $clients[$id]['imei'], $profile,
+                                    $clients[$id]['session_id'], $clients[$id]['connected_at'], $clients[$id]['peer'], $receivedAt, $traceId);
                                 $this->record(config('gps.live_first') ? 'PACKET_QUEUED' : 'DATABASE_SAVED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type]);
+                            }
+                            if ($packet->ack !== '') {
+                                $clients[$id]['out'] .= $packet->ack;
+                                $clients[$id]['acks'][] = ['remaining' => strlen($packet->ack), 'trace_id' => $traceId, 'started' => $readStarted];
+                                $this->record('ACK_QUEUED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type,
+                                    'bytes' => strlen($packet->ack)]);
+                                $this->flushAcks($clients, $id, $close);
+                                if (! isset($clients[$id])) {
+                                    break;
+                                }
                             }
                             $deviceState = $deviceStates[$clients[$id]['imei']];
                             $deviceState->observe($packet, $clients[$id]['imei'], $lastData);
@@ -255,42 +293,18 @@ class DiagnoseGps extends Command
                             if (in_array($packet->type, ['heartbeat', 'device_sim_information'], true)) {
                                 $this->record('DEVICE_STATUS', $deviceState->snapshot(true));
                             }
-                            if ($packet->ack !== '') {
-                                $clients[$id]['out'] .= $packet->ack;
-                                $this->record('ACK_QUEUED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type,
-                                    'hex' => strtoupper(bin2hex($packet->ack))]);
-                            }
+
                         }
                     } catch (Throwable $e) {
                         $close($id, $e instanceof InvalidArgumentException ? $e->getMessage() : 'socket_error');
                     }
                 }
-                // Include ACKs queued by this read pass immediately. These
-                // sockets are nonblocking; partial writes stay queued for the
-                // next select pass instead of adding a one-second idle wait.
-                foreach ($clients as $client) {
-                    if ($client['out'] === '') {
-                        continue;
-                    }
-                    $socket = $client['socket'];
-                    $id = (int) $socket;
-                    if (! isset($clients[$id])) {
-                        continue;
-                    }
-                    try {
-                        $written = @fwrite($socket, $clients[$id]['out']);
-                    } catch (Throwable) {
-                        $written = false;
-                    }
-                    if ($written === false) {
-                        $close($id, 'write_failed');
-                    } elseif ($written > 0) {
-                        $clients[$id]['out'] = substr($clients[$id]['out'], $written);
-                        $this->record('ACK_SENT', ['imei' => $clients[$id]['imei'], 'bytes' => $written]);
-                    }
+                foreach (array_keys($clients) as $id) {
+                    $this->flushAcks($clients, $id, $close);
                 }
                 foreach ($clients as $id => $client) {
-                    if (time() - $client['activity'] > 240) {
+                    if (($client['imei'] === null && time() - strtotime($client['connected_at'].' UTC') > config('gps.login_timeout_seconds'))
+                        || (config('gps.socket_idle_seconds') > 0 && time() - $client['activity'] > config('gps.socket_idle_seconds'))) {
                         $close($id, 'idle_timeout');
                     }
                 }
@@ -315,8 +329,46 @@ class DiagnoseGps extends Command
         return self::SUCCESS;
     }
 
+    private function flushAcks(array &$clients, int $id, callable $close): void
+    {
+        if (! isset($clients[$id]) || $clients[$id]['out'] === '') {
+            return;
+        }
+        try {
+            $written = @fwrite($clients[$id]['socket'], $clients[$id]['out']);
+        } catch (Throwable) {
+            $written = false;
+        }
+        if ($written === false) {
+            $close($id, 'write_failed');
+
+            return;
+        }
+        if ($written === 0) {
+            return;
+        }
+        $remaining = $written;
+        while ($remaining > 0 && $clients[$id]['acks']) {
+            $ack = &$clients[$id]['acks'][0];
+            $used = min($remaining, $ack['remaining']);
+            $ack['remaining'] -= $used;
+            $remaining -= $used;
+            if ($ack['remaining'] > 0) {
+                unset($ack);
+                break;
+            }
+            HardwareTelemetry::phase('ack_sent', ['trace_id' => $ack['trace_id'], 'device_id' => $clients[$id]['device_id'],
+                'duration_ms' => (hrtime(true) - $ack['started']) / 1000000]);
+            unset($ack);
+            array_shift($clients[$id]['acks']);
+        }
+        $clients[$id]['out'] = substr($clients[$id]['out'], $written);
+        $this->record('ACK_SENT', ['imei' => $clients[$id]['imei'], 'bytes' => $written]);
+    }
+
     private function record(string $event, array $fields): void
     {
+        $fields = HardwareTelemetry::redact($fields);
         $time = now()->timezone('Asia/Kolkata')->format('Y-m-d H:i:s T');
         $text = $this->option('format') === 'json'
             ? json_encode(['time' => $time, 'event' => $event, ...$fields], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)

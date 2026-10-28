@@ -6,6 +6,7 @@ use App\Events\HardwarePacketLive;
 use App\Models\GpsDevice;
 use App\Services\Gps\HardwareFleet;
 use App\Services\Gps\HardwareLiveState;
+use App\Services\Gps\HardwareTelemetry;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -18,12 +19,14 @@ class DeliverHardwarePacket implements ShouldQueue
     use Queueable;
 
     public int $tries = 5;
+
     public int $timeout = 30;
+
     public string $receivedPreciselyAt;
 
     public function __construct(public ProcessHardwarePacket $packet, public string $persistenceConnection, public bool $publish = true)
     {
-        $this->receivedPreciselyAt = now()->utc()->format('Y-m-d\TH:i:s.u\Z');
+        $this->receivedPreciselyAt = $packet->receivedPreciselyAt ?? now()->utc()->format('Y-m-d\TH:i:s.u\Z');
     }
 
     public function backoff(): array
@@ -43,7 +46,11 @@ class DeliverHardwarePacket implements ShouldQueue
         }
         try {
             $payload = $live->project($live->baseline($device, $fleet), $packet, $this->receivedPreciselyAt);
-            if ($this->publish) HardwarePacketLive::dispatch($payload);
+            HardwareTelemetry::phase('latest_projected', ['trace_id' => $packet->traceId ?? null,
+                'device_id' => $device->id, 'queue_delay_ms' => $payload['queue_delay_ms'] ?? null]);
+            if ($this->publish) {
+                HardwarePacketLive::dispatch($payload);
+            }
         } catch (Throwable) {
             // A closed browser / unavailable Reverb must not stop GPS history.
             // Reconnect snapshots use the live cache while SQL catches up.

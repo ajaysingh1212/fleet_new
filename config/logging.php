@@ -1,5 +1,6 @@
 <?php
 
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -51,6 +52,10 @@ return [
     */
 
     'channels' => [
+        'gps_pipeline' => [
+            'driver' => 'daily', 'path' => env('GPS_TRACE_PATH', storage_path('logs/gps-pipeline.log')),
+            'level' => 'info', 'days' => 3, 'locking' => true, 'formatter' => JsonFormatter::class,
+        ],
 
         'stack' => [
             'driver' => 'stack',

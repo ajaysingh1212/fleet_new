@@ -14,6 +14,8 @@ final class Connection
 
     public ?string $identifier = null;
 
+    public ?string $receivedAt = null;
+
     public readonly string $id;
 
     public readonly string $connectedAt;

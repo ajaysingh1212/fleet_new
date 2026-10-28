@@ -52,6 +52,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\Models\Role;
@@ -75,6 +76,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Queue::looping(function ($event) {
+            if (in_array($event->queue, [config('gps.live_queue'), config('gps.persistence_queue'), config('gps.broadcast_queue')], true)
+                && is_file(storage_path('framework/gps-workers.stop'))) {
+                app('queue.worker')->shouldQuit = true;
+            }
+        });
         Model::shouldBeStrict(! app()->isProduction());
         Paginator::useBootstrapFive();
         Gate::policy(GpsDevice::class, GpsDevicePolicy::class);

@@ -14,7 +14,7 @@
     <aside class="offcanvas offcanvas-start fleet-summary-drawer" id="fleet-summary-drawer" tabindex="-1" aria-labelledby="fleet-summary-title" data-bs-scroll="true" data-bs-backdrop="false">
         <div class="offcanvas-header"><h2 class="offcanvas-title h5" id="fleet-summary-title">Fleet summary</h2><button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close summary cards"></button></div>
         <div class="offcanvas-body"><div class="fleet-dashboard-stats">
-        @foreach(['total' => 'Total vehicles', 'online' => 'Online', 'reconnecting' => 'Reconnecting', 'moving' => 'Moving', 'offline' => 'Offline / inactive', 'alerts' => 'Geofence warnings'] as $key => $label)
+        @foreach(['total' => 'Total vehicles', 'online' => 'Online', 'reconnecting' => 'Online · TCP reconnecting', 'moving' => 'Moving', 'offline' => 'Offline / inactive', 'alerts' => 'Geofence warnings'] as $key => $label)
             <div class="fleet-metric fleet-metric-{{ $key }}"><span>{{ $label }}</span><strong data-dashboard-stat="{{ $key }}">—</strong></div>
         @endforeach
         </div></div>

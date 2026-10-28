@@ -18,7 +18,8 @@ class HardwareGpsNetworkTest extends TestCase
         }
         $prefix = 'gps-network-test-'.bin2hex(random_bytes(8)).':';
         config(['database.redis.client' => 'predis', 'database.redis.options.prefix' => $prefix,
-            'cache.prefix' => $prefix, 'gps.cache_store' => 'redis', 'gps.queue_connection' => 'redis']);
+            'cache.prefix' => $prefix, 'gps.cache_store' => 'redis', 'gps.queue_connection' => 'redis',
+            'gps.live_cache_store' => 'redis', 'gps.live_first' => false]);
         Redis::purge('default');
         Redis::purge('cache');
         Cache::purge('redis');
@@ -36,6 +37,7 @@ class HardwareGpsNetworkTest extends TestCase
                 $process = new Process([PHP_BINARY, 'artisan', 'gps:listen', '--host=127.0.0.1', '--port='.$port], base_path(), [
                     'APP_ENV' => 'testing', 'REDIS_CLIENT' => 'predis', 'REDIS_PREFIX' => $prefix, 'CACHE_PREFIX' => $prefix,
                     'GPS_CACHE_STORE' => 'redis', 'GPS_QUEUE_CONNECTION' => 'redis',
+                    'GPS_LIVE_CACHE_STORE' => 'redis', 'GPS_LIVE_FIRST' => 'false',
                 ]);
                 $process->start();
                 $deadline = microtime(true) + 10;

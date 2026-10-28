@@ -35,22 +35,24 @@ class HardwareConnectionStateTest extends TestCase
             'status' => 'active', 'protocol' => 'pt06', 'protocol_version' => '2022.4.27-v2', 'last_packet_at' => now()]);
     }
 
-    public function test_close_is_offline_immediately_and_a_queued_packet_cannot_reopen_the_connection(): void
+    public function test_close_does_not_imply_device_offline_and_queued_packets_cannot_reopen_the_socket(): void
     {
         $d = $this->device();
         $presence = app(HardwareConnectionState::class);
         $presence->touch($d->id, 'session-a');
         $this->assertTrue($d->is_online);
         $presence->close($d->id, 'session-a');
-        $this->assertFalse($d->is_online);
+        $this->assertTrue($d->is_online);
         $packet = new ProcessHardwarePacket($d->id, $d->identifier, 'session-a', now()->utc()->format('Y-m-d H:i:s'),
             '127.0.0.1', 'pt06', '2022.4.27-v2', 'heartbeat', hash('sha256', 'late'), [], ['acc' => true],
             now()->utc()->format('Y-m-d H:i:s'), null);
         app()->call([new DeliverHardwarePacket($packet, 'database'), 'handle']);
         $state = app(HardwareFleet::class)->snapshot()[0];
         $this->assertFalse($state['connection_connected']);
-        $this->assertFalse($state['online']);
-        $this->assertSame('offline', $state['state']);
+        $this->assertTrue($state['online']);
+        $this->travel(181)->seconds();
+        $this->assertFalse($d->is_online);
+        $this->assertSame('offline', app(HardwareFleet::class)->snapshot()[0]['state']);
         $presence->touch($d->id, 'session-b');
         $this->assertTrue($d->is_online);
         $this->assertTrue(app(HardwareFleet::class)->snapshot()[0]['online']);
@@ -68,16 +70,18 @@ class HardwareConnectionStateTest extends TestCase
         $this->assertFalse($presence->snapshot($d->id)['connection_connected']);
     }
 
-    public function test_existing_closed_sql_session_is_offline_without_a_presence_cache(): void
+    public function test_closed_sql_socket_stays_recently_seen_until_the_packet_timeout(): void
     {
         $d = $this->device();
         DB::table('gps_connection_sessions')->insert(['id' => 'existing-closed', 'gps_device_id' => $d->id,
             'protocol' => 'pt06', 'remote_ip' => '127.0.0.1', 'authenticated' => true,
             'connected_at' => now(), 'last_packet_at' => now(), 'disconnected_at' => now()]);
+        $this->assertTrue($d->is_online);
+        $this->assertTrue(app(HardwareFleet::class)->snapshot()[0]['online']);
+        $this->assertCount(1, app(HardwareFleet::class)->page(['status' => 'online'])['devices']);
+        $this->assertCount(0, app(HardwareFleet::class)->page(['status' => 'offline'])['devices']);
+        $this->travel(181)->seconds();
         $this->assertFalse($d->is_online);
-        $this->assertFalse(app(HardwareFleet::class)->snapshot()[0]['online']);
-        $this->assertCount(0, app(HardwareFleet::class)->page(['status' => 'online'])['devices']);
-        $this->assertCount(1, app(HardwareFleet::class)->page(['status' => 'offline'])['devices']);
     }
 
     public function test_receiver_packets_keep_presence_online_even_while_history_and_live_jobs_are_waiting(): void
@@ -92,6 +96,21 @@ class HardwareConnectionStateTest extends TestCase
         $this->assertNotEmpty($state['connection_last_packet_at']);
         $this->assertTrue(CarbonImmutable::parse($state['last_packet_at'])->gte(now()->subSecond()));
         app(HardwareConnectionState::class)->close($device->id, 'receiving-now');
+        $this->assertTrue($device->fresh()->is_online);
+        $this->travel(181)->seconds();
+        $this->assertFalse($device->fresh()->is_online);
+    }
+
+    public function test_socket_keepalive_does_not_forge_device_packets_or_extend_device_availability(): void
+    {
+        $device = $this->device();
+        $presence = app(HardwareConnectionState::class);
+        $presence->touch($device->id, 'quiet-open');
+        $last = $presence->snapshot($device->id)['connection_last_packet_at'];
+        $this->travel(181)->seconds();
+        $presence->keepAlive($device->id, 'quiet-open');
+        $this->assertTrue($presence->snapshot($device->id)['connection_connected']);
+        $this->assertSame($last, $presence->snapshot($device->id)['connection_last_packet_at']);
         $this->assertFalse($device->fresh()->is_online);
     }
 }

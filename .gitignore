@@ -8,6 +8,7 @@
 /storage/framework/gps-port-*.lock
 /storage/framework/gps-realtime-processes.json
 /storage/framework/gps-workers.lock
+/storage/framework/gps-workers.stop
 /storage/framework/gps-workers-status.json
 /storage/framework/gps-workers-status.json.tmp
 /storage/app/private/gps-tls/

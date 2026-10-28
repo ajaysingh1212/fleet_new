@@ -18,11 +18,16 @@ final class HardwareConnectionState
         $this->change($deviceId, $sessionId, false);
     }
 
-    private function change(int $deviceId, string $sessionId, bool $connected): void
+    public function keepAlive(int $deviceId, string $sessionId): void
+    {
+        $this->change($deviceId, $sessionId, true, false);
+    }
+
+    private function change(int $deviceId, string $sessionId, bool $connected, bool $packet = true): void
     {
         $store = Cache::store(config('gps.live_cache_store'));
         $key = 'gps.connections.'.$deviceId;
-        $store->lock($key.'.lock', 10)->block(3, function () use ($store, $key, $sessionId, $connected) {
+        $store->lock($key.'.lock', 10)->block(3, function () use ($store, $key, $sessionId, $connected, $packet) {
             $state = $store->get($key, ['sessions' => []]);
             $state['sessions'] = array_filter($state['sessions'], fn ($time) => $time >= now()->timestamp - config('gps.idle_seconds'));
             if ($connected) {
@@ -30,7 +35,7 @@ final class HardwareConnectionState
             } else {
                 unset($state['sessions'][$sessionId]);
             }
-            if ($connected) {
+            if ($connected && $packet) {
                 $state['last_packet_at'] = now()->utc()->format('Y-m-d\TH:i:s.u\Z');
             }
             $state['observed_at'] = now()->utc()->format('Y-m-d\TH:i:s.u\Z');

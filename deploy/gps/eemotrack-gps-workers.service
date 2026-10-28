@@ -1,0 +1,21 @@
+[Unit]
+Description=Eemotrack dedicated adaptive GPS queue pool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/eemotrack
+ExecStart=/usr/bin/php artisan gps:workers --max=4 --jobs-per-worker=20 --interval=2
+ExecStop=/usr/bin/php artisan gps:workers --stop
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,67 @@
+{
+  "environment": "isolated MySQL/MariaDB + database queues + Reverb + headless Chrome; same-host clocks",
+  "test_devices": 3,
+  "locations_sent": 51,
+  "history_locations": 51,
+  "history_loss": 0,
+  "unexpected_disconnects": 0,
+  "ack_roundtrip_ms": {
+    "count": 237,
+    "p50": 872.7540999999983,
+    "p95": 3021.5828000000038,
+    "max": 3213.7808000000005
+  },
+  "receiver_to_ack_ms": {
+    "count": 237,
+    "p50": 46.1354,
+    "p95": 202.1459,
+    "max": 373.3532
+  },
+  "queue_delay_ms": {
+    "count": 237,
+    "p50": 976,
+    "p95": 1447,
+    "max": 1631
+  },
+  "server_to_browser_ms": {
+    "count": 47,
+    "p50": 161,
+    "p95": 319,
+    "max": 396
+  },
+  "server_to_first_marker_frame_ms": {
+    "count": 47,
+    "p50": 172,
+    "p95": 326,
+    "max": 401
+  },
+  "browser_event_to_marker_ms": {
+    "count": 47,
+    "p50": 5.599999999627471,
+    "p95": 12.400000000372529,
+    "max": 12.800000000745058
+  },
+  "pending_after_drain": 0,
+  "peak_observed_pending": 65,
+  "peak_observed_workers": 5,
+  "failed_jobs": 0,
+  "received_frames": 237,
+  "expected_frames": 237,
+  "websocket_recovery_without_new_gps_ms": 1727.1010000000024,
+  "ui": {
+    "stage_height": 834.625,
+    "viewport_height": 950,
+    "drawers_closed": true,
+    "vehicles_drawer_opens": true,
+    "information_drawer_opens": true
+  },
+  "browser_errors": [],
+  "other_page_errors": [
+    {
+      "message": "THREE is not defined",
+      "page": "http://127.0.0.1:18091/login",
+      "stack": "ReferenceError: THREE is not defined\n    at http://127.0.0.1:18091/login:450:26\n    at http://127.0.0.1:18091/login:814:7"
+    }
+  ],
+  "note": "Broadcast coalescing is intentional. Marker metrics count rendered new GPS timestamps, not every heartbeat/history packet."
+}

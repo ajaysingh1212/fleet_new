@@ -41,7 +41,7 @@ export function fleetState(p, now = Date.now()) {
     const threshold = (p.idle_seconds ?? 180) * 1000;
     const gpsThreshold = (p.gps_fresh_seconds ?? 15) * 1000;
     const communication = communicationAt(p);
-    if (p.connection_connected === false || !communication || now - communication > threshold) return 'offline';
+    if (!communication || now - communication > threshold) return 'offline';
     const fix = Date.parse(p.recorded_at);
     const accTime = Date.parse(p.acc_reported_at ?? p.recorded_at);
     const acc = Number.isFinite(accTime) && now - accTime <= threshold ? (p.acc_reported ?? p.acc) : null;
@@ -63,12 +63,9 @@ export function fleetPresentation(p, now = Date.now()) {
     const gpsThreshold = (p.gps_fresh_seconds ?? 15)*1000;
     const age = now - Date.parse(p.recorded_at);
     const communication = communicationAt(p);
-    const reconnecting = p.connection_connected === false && p.reconnect_seconds > 0 && communication > 0
-        && now - communication <= p.reconnect_seconds * 1000;
     const connection = p.authorization && p.authorization !== 'active' ? p.authorization
         : p.state === 'unassigned' ? 'Unassigned'
-        : reconnecting ? 'Reconnecting'
-        : p.connection_connected !== false && communication > 0 && now - communication <= threshold ? 'Online' : 'Offline';
+        : communication > 0 && now - communication <= threshold ? 'Online' : 'Offline';
     const fresh = Number.isFinite(age) && age <= gpsThreshold && p.gps_positioned_reported !== false;
     const moving = p.speed != null && p.speed > 1.8;
     const state = fleetState(p, now);
@@ -82,5 +79,6 @@ export function fleetPresentation(p, now = Date.now()) {
     const accFresh = reportedAcc != null && Number.isFinite(accTime) && now - accTime <= threshold;
     const acc = accFresh ? `${reportedAcc ? 'ON' : 'OFF'} (device report${!reportedAcc && moving && fresh ? '; movement detected' : ''})`
         : reportedAcc == null ? 'Unknown' : `Unknown (last report ${reportedAcc ? 'ON' : 'OFF'})`;
-    return {connection, movement, gps, acc};
+    const tcp = p.connection_connected === true ? 'Connected' : p.connection_connected === false ? 'Disconnected / reconnecting' : 'Unknown';
+    return {connection, movement, gps, acc, tcp};
 }

@@ -5,6 +5,7 @@ namespace App\Events;
 use App\Models\GpsDevice;
 use App\Services\Gps\HardwareFleet;
 use App\Services\Gps\HardwareLiveState;
+use App\Services\Gps\HardwareTelemetry;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBeUnique;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -62,6 +63,11 @@ class HardwarePacketLive implements ShouldBeUnique, ShouldBroadcast
 
     public function broadcastWith(): array
     {
-        return $this->current ?? $this->payload;
+        $payload = $this->current ?? $this->payload;
+        $payload['broadcast_at'] = HardwareTelemetry::stamp();
+        HardwareTelemetry::phase('broadcast_payload_ready', ['trace_id' => $payload['trace_id'] ?? null,
+            'device_id' => $payload['device_id'], 'broadcast_at' => $payload['broadcast_at']]);
+
+        return $payload;
     }
 }

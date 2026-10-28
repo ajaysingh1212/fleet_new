@@ -64,6 +64,7 @@ final class HardwareLiveState
                     continue;
                 }
                 $incoming = [...$incoming, 'recorded_at' => $time, 'received_at' => $receivedAt,
+                    'trace_id' => $packet->traceId ?? null,
                     'latitude' => $location['latitude'], 'longitude' => $location['longitude'],
                     'speed' => $location['speed'], 'heading' => $location['heading'],
                     'altitude' => $location['altitude'] ?? null, 'satellites' => $location['satellites'] ?? null,
@@ -109,7 +110,7 @@ final class HardwareLiveState
     private function merge(array $base, array $incoming): array
     {
         foreach ([['last_packet_at', ['last_packet_at']],
-            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude', 'satellites', 'sensors']],
+            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude', 'satellites', 'sensors', 'trace_id']],
             ['heartbeat_reported_at', ['heartbeat_sensors', 'heartbeat_reported_at']],
             ['acc_reported_at', ['acc_reported', 'acc_reported_at', 'acc_source']],
             ['gps_reported_at', ['gps_positioned_reported', 'gps_reported_at']],
@@ -134,8 +135,7 @@ final class HardwareLiveState
             $p['last_packet_at'] = $p['connection_last_packet_at'];
         }
         $p['reconnect_seconds'] = config('gps.reconnect_seconds', 30);
-        $p['online'] = $p['authorization'] === 'active' && $this->time($p['last_packet_at'] ?? null) >= $cutoff
-            && ($p['connection_connected'] ?? true);
+        $p['online'] = $p['authorization'] === 'active' && $this->time($p['last_packet_at'] ?? null) >= $cutoff;
         $p['acc'] = $this->time($p['acc_reported_at'] ?? null) >= $cutoff ? ($p['acc_reported'] ?? null) : null;
         if (isset($p['gps_reported_at']) && $this->time($p['gps_reported_at']) < $cutoff) {
             $p['gps_positioned_reported'] = null;

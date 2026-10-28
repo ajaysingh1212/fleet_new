@@ -47,7 +47,6 @@ class GpsDevice extends Model
             }
         }
 
-        return $this->status === 'active' && $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')))
-            && ($presence['connection_connected'] ?? true);
+        return $this->status === 'active' && (bool) $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')));
     }
 }

@@ -6,6 +6,7 @@ import {HardwareMarkerMotion} from './hardware-marker-motion.js';
 import {HardwareFleetStream} from './hardware-fleet-stream.js';
 import {initFleetConsole} from './fleet-console.js';
 import {warningLabel} from './fleet-geofence-alerts.js';
+import {browserReceived, markerDrawn} from './gps-pipeline-metrics.js';
 
 const colors = {moving: '#16803c', idle: '#c77c00', parked: '#2563eb', stopped: '#2563eb', offline: '#64748b', stale_gps: '#a16207', awaiting_gps: '#a16207', no_gps_fix: '#a16207'};
 const car = '<path d="M5 15l2-6h10l2 6M4 15h16v6H4zM7 21v3m10-3v3M8 12h8"/>';
@@ -41,7 +42,7 @@ export function initHardwareGps() {
             ...(consoleUi?.getAlerts(p.device_id) ?? []).map(a => `${a.historical ? 'GPS WARNING' : 'ALERT'}: ${a.label ?? warningLabel(a.type)} - ${a.geofence_name} - ${a.detail ?? 'Violation recorded'}`), `Driver: ${p.driver_name ?? 'Not assigned'}`,
             `Connection: ${display.connection}`, `Movement: ${display.movement}`, `GPS: ${display.gps}`,
             `Last GPS speed: ${p.speed ?? 'Unknown'} km/h`, `ACC: ${display.acc}`,
-            `TCP link: ${p.connection_connected === false ? 'Closed by peer / awaiting reconnect' : 'Connected'}`,
+            `TCP link: ${display.tcp}`,
             ...(p.queue_delay_ms != null ? [`Server queue delay: ${p.queue_delay_ms} ms`] : []),
             ...(p.sensors?.gps_retransmission === true ? ['Device is uploading a stored GPS fix'] : []),
             ...(p.acc_reported_at ? [`ACC report time: ${new Date(p.acc_reported_at).toLocaleString()}`] : []),
@@ -116,6 +117,7 @@ export function initHardwareGps() {
                 const motion = new HardwareMarkerMotion(marker);
                 motion.timestamp = Date.parse(p.recorded_at);
                 animations.set(id, motion);
+                requestAnimationFrame(() => markerDrawn(p));
             } else {
                 if (appearances.get(id) !== appearance) {
                     marker.setIcon(icon(p)); appearances.set(id, appearance);
@@ -124,7 +126,7 @@ export function initHardwareGps() {
                     marker.setPopupContent(popup(p));
                 }
                 if (newer) {
-                    animations.get(id).push([p.latitude, p.longitude], Date.parse(p.recorded_at));
+                    animations.get(id).push([p.latitude, p.longitude], Date.parse(p.recorded_at), {onFrame: () => markerDrawn(p)});
                 }
             }
         } else {
@@ -171,7 +173,7 @@ export function initHardwareGps() {
             navigation = null;
             data.devices.forEach(update); meta = data.meta; renderRoster(); if (!fitted) fit(); consoleUi?.loadActive(); consoleUi?.loadZones();
         },
-        onUpdate: queueUpdate,
+        onUpdate: p => queueUpdate(browserReceived(p)),
         onStatus: state => { if (state === 'error') navigation = null; liveState = state; describeStream(); },
     });
     consoleUi = initFleetConsole({map, vehicles,

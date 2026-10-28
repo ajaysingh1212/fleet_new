@@ -3,7 +3,10 @@
 namespace Tests\Feature;
 
 use App\Events\HardwareLocationUpdated;
+use App\Jobs\CloseHardwareSession;
+use App\Jobs\DeliverHardwarePacket;
 use App\Jobs\ProcessHardwarePacket;
+use App\Jobs\StoreHardwareDiagnostic;
 use App\Models\GpsDevice;
 use App\Models\Vehicle;
 use App\Services\Gps\Gateway\Connection;
@@ -70,6 +73,30 @@ class HardwareGpsTest extends TestCase
             'manufacturer' => 'Teltonika', 'model' => 'FMB920', 'protocol' => 'teltonika', 'protocol_version' => '8',
             'status' => 'active', 'configuration' => ['transport' => 'tcp', 'server_host' => 'gps.example.test',
                 'server_port' => 9000, 'timezone' => 'UTC']];
+    }
+
+    public function test_gateway_live_first_routes_input_and_session_cleanup_to_serviced_queues(): void
+    {
+        $this->device();
+        config(['gps.live_first' => true, 'gps.pending_diagnostics' => true]);
+        Queue::fake();
+        $socket = new Connection('127.0.0.1');
+        $gateway = app(Gateway::class);
+        $this->assertSame("\x01", $gateway->feed($socket, $this->login()));
+        Queue::assertPushed(DeliverHardwarePacket::class, fn ($job, $queue) => $queue === config('gps.live_queue'));
+        $gateway->disconnected($socket);
+        Queue::assertPushed(CloseHardwareSession::class, fn ($job, $queue) => $queue === config('gps.persistence_queue'));
+        $gateway->diagnostic($socket, 'redacted-fixture', 'fixture');
+        Queue::assertPushed(StoreHardwareDiagnostic::class, fn ($job, $queue) => $queue === config('gps.persistence_queue'));
+    }
+
+    public function test_redis_gateway_rejects_unserviced_live_connection_before_opening_listener(): void
+    {
+        config(['gps.queue_connection' => 'gps-redis', 'gps.cache_store' => 'gps-redis',
+            'gps.live_first' => true, 'gps.live_connection' => 'database']);
+        $this->artisan('gps:listen', ['--host' => '127.0.0.1', '--port' => 19006, '--once' => true])
+            ->expectsOutput('Redis live-first gateway requires GPS_LIVE_CONNECTION to match GPS_QUEUE_CONNECTION.')
+            ->assertFailed();
     }
 
     private function device(): GpsDevice
@@ -194,6 +221,23 @@ class HardwareGpsTest extends TestCase
     private function login(): string
     {
         return "\x00\x0f356307042441013";
+    }
+
+    public function test_pt06_repeat_login_is_idempotent_but_a_socket_cannot_change_device_identity(): void
+    {
+        $device = GpsDevice::create(['identifier' => '359097370008313', 'name' => 'Fixture', 'protocol' => 'pt06',
+            'protocol_version' => Pt06::VERSION, 'status' => 'active']);
+        app(DeviceAllowlist::class)->sync($device);
+        $frame = hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/pt06/pdf-login.hex'))));
+        $ack = hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/pt06/pdf-login-ack.hex'))));
+        $socket = new Connection('127.0.0.1');
+        $gateway = app(Gateway::class);
+        $this->assertSame($ack, $gateway->feed($socket, $frame));
+        $this->assertSame($ack, $gateway->feed($socket, $frame));
+        $this->assertSame($device->id, $socket->device['id']);
+        $other = hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/pt06/device-login-20261017.hex'))));
+        $this->expectExceptionMessage('device_identity_changed');
+        $gateway->feed($socket, $other);
     }
 
     /** Simulated Codec8/8E record with no model-specific IO. */

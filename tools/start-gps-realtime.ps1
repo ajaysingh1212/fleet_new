@@ -22,7 +22,11 @@ function Start-GpsService([string]$Name, [string[]]$Arguments, [int]$ListenPort 
             }
             # Only stop the exact process recorded by this workspace, checking
             # start time as well as PID so a reused PID is never terminated.
-            Stop-Process -Id $gpsRunning.Id
+            if ($Name -eq 'worker-supervisor') {
+                & $gpsPhp artisan gps:workers --stop
+                $gpsRunning.WaitForExit(15000) | Out-Null
+            }
+            if (-not $gpsRunning.HasExited) { Stop-Process -Id $gpsRunning.Id }
             $gpsRunning.WaitForExit(10000) | Out-Null
             if (-not $gpsRunning.HasExited) { throw "$Name did not stop." }
         }

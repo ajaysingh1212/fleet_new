@@ -10,12 +10,19 @@ use Symfony\Component\Process\Process;
 
 class SuperviseGpsWorkers extends Command
 {
-    protected $signature = 'gps:workers {--max=4 : Maximum workers per queue} {--jobs-per-worker=20} {--interval=2} {--once : Print demand without spawning workers}';
+    protected $signature = 'gps:workers {--max=4 : Maximum workers per queue} {--jobs-per-worker=20} {--interval=2} {--once : Print demand without spawning workers} {--stop : Gracefully stop this GPS pool between jobs}';
 
     protected $description = 'Keep GPS workers alive and add bounded workers when live/history/broadcast queues grow';
 
     public function handle(): int
     {
+        $stopFile = storage_path('framework/gps-workers.stop');
+        if ($this->option('stop')) {
+            file_put_contents($stopFile, (string) time());
+            $this->info('GPS pool stop requested; active jobs may finish.');
+
+            return self::SUCCESS;
+        }
         $max = filter_var($this->option('max'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 16]]);
         $batch = filter_var($this->option('jobs-per-worker'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 1000]]);
         $interval = filter_var($this->option('interval'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 30]]);
@@ -43,6 +50,9 @@ class SuperviseGpsWorkers extends Command
             return self::FAILURE;
         }
         $workers = [];
+        if (! $this->option('once') && is_file($stopFile)) {
+            unlink($stopFile);
+        }
         $stopping = false;
         if (function_exists('pcntl_async_signals')) {
             pcntl_async_signals(true);
@@ -55,6 +65,7 @@ class SuperviseGpsWorkers extends Command
         }
         try {
             do {
+                $stopping = $stopping || is_file($stopFile);
                 $status = [];
                 foreach ($queues as [$connection, $queue]) {
                     $key = $connection.':'.$queue;
@@ -70,16 +81,23 @@ class SuperviseGpsWorkers extends Command
                             $process->clearErrorOutput();
                         }
                     }
-                    $pending = Queue::connection($connection)->size($queue);
+                    $pending = 0;
                     $oldest = 0;
-                    if (config('queue.connections.'.$connection.'.driver') === 'database') {
-                        $settings = config('queue.connections.'.$connection);
-                        $created = DB::connection($settings['connection'] ?? null)->table($settings['table'] ?? 'jobs')
-                            ->where('queue', $queue)->whereNull('reserved_at')->min('created_at');
-                        $oldest = $created ? max(0, time() - $created) : 0;
+                    $available = true;
+                    try {
+                        $pending = Queue::connection($connection)->size($queue);
+                        if (config('queue.connections.'.$connection.'.driver') === 'database') {
+                            $settings = config('queue.connections.'.$connection);
+                            $created = DB::connection($settings['connection'] ?? null)->table($settings['table'] ?? 'jobs')
+                                ->where('queue', $queue)->whereNull('reserved_at')->min('created_at');
+                            $oldest = $created ? max(0, time() - $created) : 0;
+                        }
+                    } catch (\Throwable) {
+                        $available = false;
+                        $this->warn($key.' queue unavailable; retaining workers and retrying.');
                     }
-                    $desired = HardwareWorkerPlan::desired($pending, $max, $batch, $oldest);
-                    if (! $this->option('once')) {
+                    $desired = $available ? HardwareWorkerPlan::desired($pending, $max, $batch, $oldest) : max(1, count($workers[$key]));
+                    if (! $this->option('once') && ! $stopping) {
                         while (count($workers[$key]) < $desired) {
                             $burst = count($workers[$key]) > 0;
                             $arguments = [PHP_BINARY, base_path('artisan'), 'queue:work', $connection,
@@ -97,7 +115,7 @@ class SuperviseGpsWorkers extends Command
                             $this->info('Started '.$key.' worker PID '.$process->getPid());
                         }
                     }
-                    $status[] = ['queue' => $queue, 'connection' => $connection, 'pending' => $pending,
+                    $status[] = ['queue' => $queue, 'connection' => $connection, 'pending' => $available ? $pending : null, 'available' => $available,
                         'oldest_seconds' => $oldest, 'desired' => $desired, 'running' => count($workers[$key]),
                         'pids' => array_values(array_map(fn ($process) => $process->getPid(), $workers[$key]))];
                 }
@@ -109,7 +127,7 @@ class SuperviseGpsWorkers extends Command
                     rename($target.'.tmp', $target);
                     usleep($interval * 1000000);
                 }
-            } while (! $stopping && ! $this->option('once'));
+            } while ((! $stopping || array_sum(array_map('count', $workers)) > 0) && ! $this->option('once'));
         } finally {
             foreach ($workers as $pool) {
                 foreach ($pool as $process) {

@@ -21,6 +21,7 @@
         <env name="APP_ENV" value="testing"/>
         <!-- Legacy persistence tests opt out; live-first tests enable it explicitly. -->
         <env name="GPS_LIVE_FIRST" value="false"/>
+        <env name="GPS_TRACE_ENABLED" value="false"/>
         <env name="GPS_LIVE_CACHE_STORE" value="array"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

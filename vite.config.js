@@ -4,14 +4,15 @@ import laravel from 'laravel-vite-plugin';
 export default defineConfig({
     server: {
         host: '127.0.0.1',
-        port: 5173,
+        port: Number(process.env.GPS_AUDIT_VITE_PORT ?? 5173),
         hmr: {
             host: 'localhost',
-            port: 5173,
+            port: Number(process.env.GPS_AUDIT_VITE_PORT ?? 5173),
         },
     },
     plugins: [
         laravel({
+            hotFile: process.env.GPS_AUDIT_HOT_FILE ?? 'public/hot',
             input: [
                 'resources/css/app.css',
                 'resources/js/app.js',

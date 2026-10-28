@@ -23,19 +23,9 @@ final class HardwareFleet
         $status = $filters['status'] ?? null;
         if ($status === 'online') {
             $query->where('status', 'active')->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds')));
-            $query->where(fn ($q) => $q->whereNotExists(fn ($s) => $s->selectRaw('1')->from('gps_connection_sessions')
-                ->whereColumn('gps_device_id', 'gps_devices.id'))
-                ->orWhereExists(fn ($s) => $s->selectRaw('1')->from('gps_connection_sessions')
-                    ->whereColumn('gps_device_id', 'gps_devices.id')->whereNull('disconnected_at')
-                    ->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds')))));
         } elseif ($status === 'offline') {
             $query->where('status', 'active')->where(fn ($q) => $q->whereNull('last_packet_at')
-                ->orWhere('last_packet_at', '<', now()->subSeconds(config('gps.idle_seconds')))
-                ->orWhere(fn ($q) => $q->whereExists(fn ($s) => $s->selectRaw('1')->from('gps_connection_sessions')
-                    ->whereColumn('gps_device_id', 'gps_devices.id'))
-                    ->whereNotExists(fn ($s) => $s->selectRaw('1')->from('gps_connection_sessions')
-                        ->whereColumn('gps_device_id', 'gps_devices.id')->whereNull('disconnected_at')
-                        ->where('last_packet_at', '>=', now()->subSeconds(config('gps.idle_seconds'))))));
+                ->orWhere('last_packet_at', '<', now()->subSeconds(config('gps.idle_seconds'))));
         } elseif ($status) {
             $query->where('status', $status);
         }
@@ -83,8 +73,7 @@ final class HardwareFleet
                 $lastPacket = $received;
             }
         }
-        $online = $device->status === 'active' && $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')))
-            && ($presence['connection_connected'] ?? true);
+        $online = $device->status === 'active' && $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')));
         $position = $device->latestLocation;
         $heartbeat = $device->latestHeartbeat;
         $telemetry = $heartbeat ? json_decode($heartbeat->telemetry, true) : [];

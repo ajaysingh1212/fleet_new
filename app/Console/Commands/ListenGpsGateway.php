@@ -6,6 +6,8 @@ use App\Services\Gps\Gateway\Connection;
 use App\Services\Gps\Gateway\DeviceAllowlist;
 use App\Services\Gps\Gateway\Gateway;
 use App\Services\Gps\Gateway\TcpListenerLease;
+use App\Services\Gps\HardwareConnectionState;
+use App\Services\Gps\HardwareTelemetry;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Queue;
 use InvalidArgumentException;
@@ -58,6 +60,11 @@ class ListenGpsGateway extends Command
 
             return self::FAILURE;
         }
+        if (config('gps.live_first') && config('gps.live_connection') !== config('gps.queue_connection')) {
+            $this->error('Redis live-first gateway requires GPS_LIVE_CONNECTION to match GPS_QUEUE_CONNECTION.');
+
+            return self::FAILURE;
+        }
         try {
             $allowlist->store()->put('gps.hardware.health', now()->timestamp, 15);
             Queue::connection(config('gps.queue_connection'))->size(config('gps.queue'));
@@ -90,11 +97,13 @@ class ListenGpsGateway extends Command
         $clients = [];
         $handled = false;
         $this->info('GPS hardware gateway: '.$address);
-        $close = function ($id) use (&$clients, $gateway): void {
+        $close = function ($id, string $reason = 'socket_closed') use (&$clients, $gateway): void {
             if (! isset($clients[$id])) {
                 return;
             }
             try {
+                HardwareTelemetry::phase('socket_closed', ['device_id' => $clients[$id]['state']->device['id'] ?? null,
+                    'session_id' => $clients[$id]['state']->id, 'reason' => $reason]);
                 $gateway->disconnected($clients[$id]['state']);
             } catch (Throwable) {
             }
@@ -105,6 +114,15 @@ class ListenGpsGateway extends Command
         try {
             while (! $this->stopping) {
                 if (time() - $healthAt >= 5) {
+                    foreach ($clients as $client) {
+                        if ($client['state']->device) {
+                            try {
+                                app(HardwareConnectionState::class)->keepAlive($client['state']->device['id'], $client['state']->id);
+                            } catch (Throwable) {
+                            }
+                        }
+                    }
+                    HardwareTelemetry::receiver($port, count($clients), count(array_filter($clients, fn ($c) => $c['state']->device !== null)));
                     $allowlist->store()->put('gps.hardware.health', time(), 15);
                     $healthAt = time();
                 }
@@ -144,9 +162,9 @@ class ListenGpsGateway extends Command
                     }
                     $id = (int) $socket;
                     try {
-                        $bytes = @fread($socket, 8192);
+                        $bytes = @fread($socket, 128);
                         if ($bytes === false || ($bytes === '' && feof($socket))) {
-                            $close($id);
+                            $close($id, 'peer_closed');
 
                             continue;
                         }
@@ -160,10 +178,11 @@ class ListenGpsGateway extends Command
                         }
                         $clients[$id]['bytes'] += strlen($bytes);
                         $clients[$id]['reads']++;
-                        if ($clients[$id]['bytes'] > 1048576 || $clients[$id]['reads'] > 600) {
+                        if ($clients[$id]['bytes'] > 1048576) {
                             throw new InvalidArgumentException('rate_limited');
                         }
                         $clients[$id]['activity'] = time();
+                        $clients[$id]['state']->receivedAt = HardwareTelemetry::stamp();
                         $clients[$id]['out'] .= $gateway->feed($clients[$id]['state'], $bytes);
                         if (strlen($clients[$id]['out']) > config('gps.max_buffer')) {
                             throw new InvalidArgumentException('output_limit');
@@ -177,7 +196,7 @@ class ListenGpsGateway extends Command
                         }
                         // Error text and raw payloads can contain secrets; log only a safe category.
                         $this->warn('Connection closed: '.$reason);
-                        $close($id);
+                        $close($id, $reason);
                     }
                 }
                 // Send newly queued ACKs in this pass, rather than waiting for
@@ -197,15 +216,15 @@ class ListenGpsGateway extends Command
                         $written = false;
                     }
                     if ($written === false) {
-                        $close($id);
+                        $close($id, 'write_failed');
                     } else {
                         $clients[$id]['out'] = substr($clients[$id]['out'], $written);
                     }
                 }
                 foreach ($clients as $id => $client) {
-                    if ((! $client['state']->device && time() - $client['started'] > 10)
-                        || time() - $client['activity'] > config('gps.idle_seconds')) {
-                        $close($id);
+                    if ((! $client['state']->device && time() - $client['started'] > config('gps.login_timeout_seconds'))
+                        || (config('gps.socket_idle_seconds') > 0 && time() - $client['activity'] > config('gps.socket_idle_seconds'))) {
+                        $close($id, $client['state']->device ? 'idle_timeout' : 'login_timeout');
                     }
                 }
                 if ($this->option('once') && $handled && ! array_filter($clients, fn ($c) => $c['out'] !== '')) {
@@ -218,7 +237,7 @@ class ListenGpsGateway extends Command
             return self::FAILURE;
         } finally {
             foreach (array_keys($clients) as $id) {
-                $close($id);
+                $close($id, 'listener_stopped');
             }
             fclose($server);
             try {
