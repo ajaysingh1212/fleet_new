@@ -139,6 +139,30 @@ class HardwareGpsLiveFirstTest extends TestCase
         $this->assertDatabaseCount('gps_device_locations', 0);
     }
 
+    public function test_current_charging_is_an_independent_live_attribute(): void
+    {
+        $device = $this->device();
+        $heartbeat = $this->packet($device, 'charging');
+        $heartbeat->type = 'heartbeat';
+        $heartbeat->locations = [];
+        $heartbeat->events = ['acc' => false, 'charging' => true, 'external_power' => true,
+            'external_voltage' => 12.4, 'power_level' => null, 'power_description' => 'external_supply'];
+        app()->call([new DeliverHardwarePacket($heartbeat, 'database'), 'handle']);
+
+        $state = app(HardwareFleet::class)->snapshot()[0];
+        $this->assertTrue($state['online']);
+        $this->assertSame('parked', $state['state']);
+        $this->assertTrue($state['charging_current']);
+        $this->assertTrue($state['external_power_current']);
+        $this->assertSame(12.4, $state['external_voltage']);
+
+        $this->travel(181)->seconds();
+        $stale = app(HardwareFleet::class)->snapshot()[0];
+        $this->assertSame('offline', $stale['state']);
+        $this->assertNull($stale['charging_current']);
+        $this->assertTrue($stale['charging']); // historical telemetry remains diagnosable.
+    }
+
     public function test_broadcast_failure_does_not_block_history_queue(): void
     {
         // Use an explicit throwing dispatcher to simulate a failed live transport.

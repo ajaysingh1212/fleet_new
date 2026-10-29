@@ -26,6 +26,17 @@ final class HardwareTelemetry
             Log::channel('gps_pipeline')->info($phase, ['at' => self::stamp(), ...$safe]);
         } catch (\Throwable) { /* Telemetry failure must not stop ingestion. */
         }
+        // A tiny current health projection, not a telemetry archive. This is
+        // used by authorized runtime diagnostics and expires automatically.
+        if (in_array($phase, ['latest_projected', 'history_stored', 'broadcast_payload_ready'], true)) {
+            try {
+                $health = Cache::store(config('gps.live_cache_store'))->get('gps.pipeline.health', []);
+                $health[$phase] = ['at' => self::stamp(), 'device_id' => $safe['device_id'] ?? null,
+                    'trace_id' => $safe['trace_id'] ?? null, 'duration_ms' => $safe['duration_ms'] ?? null];
+                Cache::store(config('gps.live_cache_store'))->put('gps.pipeline.health', $health, now()->addMinutes(15));
+            } catch (\Throwable) {
+            }
+        }
     }
 
     public static function receiver(int $port, int $connections, int $authenticated): void

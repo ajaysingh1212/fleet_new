@@ -37,6 +37,8 @@ class DeliverHardwarePacket implements ShouldQueue
     public function handle(HardwareLiveState $live, HardwareFleet $fleet): void
     {
         $packet = $this->packet;
+        HardwareTelemetry::phase('live_job_started', ['trace_id' => $packet->traceId ?? null, 'device_id' => $packet->deviceId,
+            'type' => $packet->type, 'received_at' => $this->receivedPreciselyAt]);
         $device = GpsDevice::with('vehicle')->find($packet->deviceId);
         // Recheck administrative authorization before exposing anything live.
         if (! $device || $device->status !== 'active' || $device->identifier !== $packet->identifier
@@ -60,5 +62,7 @@ class DeliverHardwarePacket implements ShouldQueue
         // A queue failure retries this durable input job. Existing SQL dedupe
         // makes a repeated delivery safe, including crashes between queues.
         Queue::connection($this->persistenceConnection)->push($packet, '', config('gps.persistence_queue'));
+        HardwareTelemetry::phase('history_queue_dispatched', ['trace_id' => $packet->traceId ?? null, 'device_id' => $packet->deviceId,
+            'type' => $packet->type, 'received_at' => $this->receivedPreciselyAt]);
     }
 }

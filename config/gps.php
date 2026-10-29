@@ -19,6 +19,10 @@ return [
     'max_frame' => 16384,
     // Device availability is last authenticated receive time, not TCP lifetime.
     'idle_seconds' => max(30, (int) env('GPS_LAST_SEEN_SECONDS', 180)),
+    // Extra grace after the configured reporting interval. A tracker comes
+    // online immediately on a valid packet; only the offline transition is
+    // delayed, which prevents status flapping without inventing liveness.
+    'offline_grace_seconds' => max(0, (int) env('GPS_OFFLINE_GRACE_SECONDS', 30)),
     'socket_idle_seconds' => max(0, (int) env('GPS_SOCKET_IDLE_SECONDS', 0)),
     'login_timeout_seconds' => max(5, (int) env('GPS_LOGIN_TIMEOUT_SECONDS', 15)),
     'trace_enabled' => (bool) env('GPS_TRACE_ENABLED', true),
@@ -38,6 +42,7 @@ return [
     'diagnostic_persist' => (bool) env('GPS_DIAGNOSTIC_PERSIST', false),
     'pending_diagnostics' => (bool) env('GPS_PENDING_DIAGNOSTICS', false),
     'diagnostic_days' => 7,
+    'live_diagnostic_buffer' => max(100, min(1000, (int) env('GPS_LIVE_DIAGNOSTIC_BUFFER', 500))),
     'location_days' => 90,
     'adapters' => [
         Pt06::class,

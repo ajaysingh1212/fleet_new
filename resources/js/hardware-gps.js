@@ -45,6 +45,7 @@ export function initHardwareGps() {
             ...(consoleUi?.getAlerts(p.device_id) ?? []).map(a => `${a.historical ? 'GPS WARNING' : 'ALERT'}: ${a.label ?? warningLabel(a.type)} - ${a.geofence_name} - ${a.detail ?? 'Violation recorded'}`), `Driver: ${p.driver_name ?? 'Not assigned'}`,
             `Connection: ${display.connection}`, `Movement: ${display.movement}`, `GPS: ${display.gps}`,
             `Last GPS speed: ${p.speed ?? 'Unknown'} km/h`, `ACC: ${display.acc}`,
+            `Power: ${display.power}`,
             `TCP link: ${display.tcp}`,
             ...(p.queue_delay_ms != null ? [`Server queue delay: ${p.queue_delay_ms} ms`] : []),
             ...(p.sensors?.gps_retransmission === true ? ['Device is uploading a stored GPS fix'] : []),
@@ -104,7 +105,7 @@ export function initHardwareGps() {
             rosterRows.set(id, button); roster.append(button);
         }
         const fields = {'.fleet-device-title':p.registration ?? p.name, '.fleet-device-meta':`${p.imei ?? 'Unassigned tracker'} · ${p.driver_name ?? 'No driver'}`,
-            '.fleet-device-state':`${display.connection} · ${display.movement} · ${p.speed ?? 'Unknown'} km/h`,
+            '.fleet-device-state':`${display.connection} · ${display.movement} · ${display.power} · ${p.speed ?? 'Unknown'} km/h`,
             '.fleet-device-alert':(consoleUi?.getAlerts(p.device_id) ?? []).map(a=>`${a.label ?? warningLabel(a.type)}: ${a.geofence_name}${a.historical ? ' - Last known location, GPS pending' : ''}`).join(' | ')};
         for(const [selector,value] of Object.entries(fields)){const node=button.querySelector(selector);if(node.textContent!==value)node.textContent=value;}
         button.title=`GPS: ${display.gps}`;
@@ -121,6 +122,7 @@ export function initHardwareGps() {
                 ['Driver', p.driver_name ?? 'Not assigned'], ['IMEI', p.imei ?? 'No tracker assigned'],
                 ['Model', p.model ?? 'Unknown'], ['Protocol', p.protocol ?? 'Unknown'],
                 ['Connection', display.connection], ['GPS', display.gps], ['ACC', display.acc],
+                ['Power', display.power],
                 ['Last communication', date(p.last_packet_at)], ['Last GPS fix', date(p.recorded_at)],
                 ['Location', point(p) ? `${p.latitude}, ${p.longitude}` : p.gps_positioned_reported === false
                     ? 'Device is online but reports no GPS fix. Place it under open sky; use STATUS or prepare LJDW (wake GPS) in Commands.'

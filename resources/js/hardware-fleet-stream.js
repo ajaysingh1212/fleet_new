@@ -1,8 +1,8 @@
 // One WebSocket connection; subscribe only to the bounded map page. HTTP is
 // used for reconciliation and bounded recovery when delivery goes silent.
 export class HardwareFleetStream {
-    constructor({echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce = 300, recoveryMs = 2000}) {
-        Object.assign(this, {echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce});
+    constructor({echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce = 300, recoveryMs = 5000, liveReconcileMs = 30000}) {
+        Object.assign(this, {echo, fetchSnapshot, onSnapshot, onUpdate, onStatus, debounce, recoveryMs, liveReconcileMs});
         this.channels = new Map();
         this.watchedCount = 0;
         this.after = 0;
@@ -15,9 +15,13 @@ export class HardwareFleetStream {
         // A healthy socket does not prove a broadcast worker is delivering.
         // Recover the current bounded page without overlapping/aborting a load.
         this.recoveryTimer = setInterval(() => {
-            if (!this.disposed && !this.loading && this.watchedCount
-                && Date.now() - this.lastReconciled >= recoveryMs) this.load();
-        }, recoveryMs);
+            if (this.disposed || this.loading || !this.watchedCount) return;
+            // WebSocket is primary. A healthy stream reconciles infrequently;
+            // a disconnected stream retries HTTP without rebuilding the map.
+            const connected = this.connection?.state === 'connected';
+            const interval = connected ? this.liveReconcileMs : this.recoveryMs;
+            if (Date.now() - this.lastReconciled >= interval) this.load();
+        }, 1000);
         this.recoveryTimer.unref?.();
         this.connection = echo?.connector?.pusher?.connection;
         this.stateChanged = ({current}) => {
@@ -42,6 +46,7 @@ export class HardwareFleetStream {
                 .listen('.hardware.location.updated', p => {
                     if (!this.disposed && this.channels.has(Number(p.device_id))) {
                         this.onUpdate(p);
+                        this.lastReconciled = Date.now();
                         this.onStatus('live');
                     }
                 })

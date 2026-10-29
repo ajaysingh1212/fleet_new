@@ -17,7 +17,9 @@ export function mergeFleetUpdate(old, incoming) {
         for (const field of ['latitude', 'longitude', 'recorded_at', 'received_at', 'speed', 'heading',
             'last_packet_at', 'acc', 'acc_reported', 'acc_reported_at', 'acc_source',
             'gps_positioned_reported', 'gps_reported_at', 'gps_fresh', 'gps_state',
-            'live_revision', 'live_received_at', 'altitude', 'satellites', 'sensors', 'heartbeat_sensors', 'heartbeat_reported_at']) p[field] = old[field];
+            'live_revision', 'live_received_at', 'altitude', 'satellites', 'sensors', 'heartbeat_sensors', 'heartbeat_reported_at',
+            'power_sensors', 'power_reported_at', 'charging', 'external_power', 'external_voltage', 'battery_voltage', 'power_level',
+            'power_description', 'charging_current', 'external_power_current']) p[field] = old[field];
     } else if (old.observed_at && incoming.observed_at && incoming.observed_at < old.observed_at
         && !(Date.parse(incoming.live_received_at) > (Date.parse(old.live_received_at ?? old.last_packet_at) || 0))) return old;
     if (Date.parse(incoming.recorded_at) < Date.parse(old.recorded_at)) {
@@ -80,5 +82,14 @@ export function fleetPresentation(p, now = Date.now()) {
     const acc = accFresh ? `${reportedAcc ? 'ON' : 'OFF'} (device report${!reportedAcc && moving && fresh ? '; movement detected' : ''})`
         : reportedAcc == null ? 'Unknown' : `Unknown (last report ${reportedAcc ? 'ON' : 'OFF'})`;
     const tcp = p.connection_connected === true ? 'Connected' : p.connection_connected === false ? 'Disconnected / reconnecting' : 'Unknown';
-    return {connection, movement, gps, acc, tcp};
+    const powerAt = Date.parse(p.power_reported_at);
+    const powerFresh = Number.isFinite(powerAt) && now - powerAt <= threshold;
+    const reportedCharging = p.charging_current ?? p.charging;
+    const reportedExternal = p.external_power_current ?? p.external_power;
+    const power = !Number.isFinite(powerAt) ? 'Power not reported'
+        : powerFresh ? (reportedCharging === true ? 'Charging' : reportedExternal === true ? 'External power' : 'Battery / not charging')
+            : (p.charging === true ? `Last confirmed charging · ${Math.max(0, Math.floor((now-powerAt)/1000))}s ago`
+                : p.external_power === true ? `Last confirmed external power · ${Math.max(0, Math.floor((now-powerAt)/1000))}s ago`
+                    : `Power report stale · ${Math.max(0, Math.floor((now-powerAt)/1000))}s ago`);
+    return {connection, movement, gps, acc, tcp, power};
 }

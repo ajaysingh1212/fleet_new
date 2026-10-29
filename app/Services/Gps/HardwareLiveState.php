@@ -77,6 +77,18 @@ final class HardwareLiveState
             if ($packet->type === 'heartbeat') {
                 $incoming['heartbeat_sensors'] = HardwareSensorData::forDisplay($packet->events);
                 $incoming['heartbeat_reported_at'] = $receivedAt;
+                // Power is a separate current attribute.  In particular, do
+                // not use a stationary/charging tracker as evidence that it
+                // is offline, and do not infer external power from battery
+                // level when the protocol has not reported it.
+                $power = HardwareSensorData::forDisplay($packet->events);
+                $incoming['power_sensors'] = $power;
+                $incoming['power_reported_at'] = $receivedAt;
+                foreach (['charging', 'external_power', 'external_voltage', 'battery_voltage', 'power_level', 'power_description'] as $field) {
+                    if (array_key_exists($field, $power)) {
+                        $incoming[$field] = $power[$field];
+                    }
+                }
                 if (isset($packet->events['acc'])) {
                     $incoming = [...$incoming, 'acc_reported' => $packet->events['acc'], 'acc_reported_at' => $receivedAt, 'acc_source' => 'heartbeat'];
                 }
@@ -113,6 +125,8 @@ final class HardwareLiveState
         foreach ([['last_packet_at', ['last_packet_at']],
             ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude', 'satellites', 'sensors', 'trace_id']],
             ['heartbeat_reported_at', ['heartbeat_sensors', 'heartbeat_reported_at']],
+            ['power_reported_at', ['power_sensors', 'power_reported_at', 'charging', 'external_power', 'external_voltage',
+                'battery_voltage', 'power_level', 'power_description']],
             ['acc_reported_at', ['acc_reported', 'acc_reported_at', 'acc_source']],
             ['gps_reported_at', ['gps_positioned_reported', 'gps_reported_at']],
             ['live_received_at', ['live_received_at', 'live_revision', 'projected_at', 'queue_delay_ms']]] as [$clock, $fields]) {
@@ -130,12 +144,14 @@ final class HardwareLiveState
 
     private function classify(array $p): array
     {
-        $cutoff = (float) now()->subSeconds(config('gps.idle_seconds'))->format('U.u');
+        $availabilitySeconds = max(30, (int) ($p['idle_seconds'] ?? config('gps.idle_seconds')));
+        $cutoff = (float) now()->subSeconds($availabilitySeconds)->format('U.u');
         $p = [...$p, ...app(HardwareConnectionState::class)->snapshot($p['device_id'])];
         if ($this->time($p['connection_last_packet_at'] ?? null) > $this->time($p['last_packet_at'] ?? null)) {
             $p['last_packet_at'] = $p['connection_last_packet_at'];
         }
         $p['reconnect_seconds'] = config('gps.reconnect_seconds', 30);
+        $p['idle_seconds'] = $availabilitySeconds;
         $p['online'] = $p['authorization'] === 'active' && $this->time($p['last_packet_at'] ?? null) >= $cutoff;
         $p['acc'] = $this->time($p['acc_reported_at'] ?? null) >= $cutoff ? ($p['acc_reported'] ?? null) : null;
         if (isset($p['gps_reported_at']) && $this->time($p['gps_reported_at']) < $cutoff) {
@@ -143,6 +159,16 @@ final class HardwareLiveState
         }
         if ($this->time($p['gps_reported_at'] ?? null) < $this->time($p['recorded_at'] ?? null)) {
             $p['gps_positioned_reported'] = null;
+        }
+        $powerFresh = $this->time($p['power_reported_at'] ?? null) >= $cutoff;
+        if (! $powerFresh) {
+            // Preserve historical values for diagnostics, but do not present
+            // a stale power report as the present charging state.
+            $p['charging_current'] = null;
+            $p['external_power_current'] = null;
+        } else {
+            $p['charging_current'] = $p['charging'] ?? null;
+            $p['external_power_current'] = $p['external_power'] ?? null;
         }
         $p['gps_fresh_seconds'] = config('gps.fresh_seconds', 15);
         $fresh = ! empty($p['recorded_at']) && $this->time($p['recorded_at']) >= (float) now()->subSeconds($p['gps_fresh_seconds'])->format('U.u');

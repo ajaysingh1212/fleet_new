@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\Gps\HardwareConnectionState;
+use App\Services\Gps\HardwareAvailability;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -52,6 +53,6 @@ class GpsDevice extends Model
             }
         }
 
-        return $this->status === 'active' && (bool) $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')));
+        return $this->status === 'active' && (bool) $lastPacket?->gte(now()->subSeconds(app(HardwareAvailability::class)->seconds($this->configuration)));
     }
 }

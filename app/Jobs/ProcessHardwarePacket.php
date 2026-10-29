@@ -40,6 +40,8 @@ class ProcessHardwarePacket implements ShouldQueue
     public function handle(): void
     {
         $started = hrtime(true);
+        HardwareTelemetry::phase('history_job_started', ['trace_id' => $this->traceId ?? null, 'device_id' => $this->deviceId,
+            'type' => $this->type, 'received_at' => $this->receivedPreciselyAt ?? $this->receivedAt]);
         $result = DB::transaction(function () {
             $device = GpsDevice::lockForUpdate()->find($this->deviceId);
             if (! $device || $device->status !== 'active' || $device->identifier !== $this->identifier

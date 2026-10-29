@@ -14,6 +14,7 @@ use App\Services\Gps\HardwareConnectionState;
 use App\Services\Gps\HardwareTelemetry;
 use App\Services\Gps\DeviceCommands;
 use App\Services\Gps\LocalHardwareRecorder;
+use App\Services\Gps\LiveDiagnosticStream;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -84,6 +85,8 @@ class DiagnoseGps extends Command
             }
             $this->record('DISCONNECTED', ['peer' => $clients[$id]['peer'], 'imei' => $clients[$id]['imei'], 'reason' => $reason,
                 'received_bytes' => $clients[$id]['bytes'], 'packets' => $clients[$id]['packets']]);
+            app(LiveDiagnosticStream::class)->append($clients[$id]['imei'], 'TCP_DISCONNECTED', ['peer' => $clients[$id]['peer'],
+                'reason' => $reason, 'received_bytes' => $clients[$id]['bytes'], 'packets' => $clients[$id]['packets']], 'warning');
             HardwareTelemetry::phase('socket_closed', ['device_id' => $clients[$id]['device_id'], 'session_id' => $clients[$id]['session_id'], 'reason' => $reason]);
             if ($profile === 'pt06' && $this->option('persist') && $clients[$id]['device_id']) {
                 try {
@@ -293,6 +296,11 @@ class DiagnoseGps extends Command
                                     break;
                                 }
                                 $clients[$id]['imei'] = $packet->identifier;
+                                app(LiveDiagnosticStream::class)->append($packet->identifier, 'TCP_AUTHENTICATED', [
+                                    'peer' => $clients[$id]['peer'], 'protocol' => $profile, 'packet_type' => $packet->type,
+                                    'checksum' => 'valid', 'serial' => $packetDetails['serial'] ?? null,
+                                    'raw_hex' => strtoupper(bin2hex($frame)),
+                                ]);
                                 // A reconnect replaces old sockets for this tracker;
                                 // commands must never be routed to a stale session.
                                 foreach (array_keys($clients) as $otherId) {
@@ -313,9 +321,19 @@ class DiagnoseGps extends Command
                                     }
                                 }
                             }
+                            if ($clients[$id]['imei']) {
+                                app(LiveDiagnosticStream::class)->append($clients[$id]['imei'], 'PACKET_DECODED', [
+                                    'protocol' => $profile, 'packet_type' => $packet->type, 'version' => $packet->version,
+                                    'checksum' => 'valid', 'serial' => $packetDetails['serial'] ?? null,
+                                    'raw_hex' => strtoupper(bin2hex($frame)), 'decoded' => ['events' => $packet->events,
+                                        'locations' => array_map(fn ($location) => $location->toArray(), $packet->locations)],
+                                ]);
+                            }
                             if ($packet->ack !== '') {
                                 $clients[$id]['out'] .= $packet->ack;
                                 $clients[$id]['acks'][] = ['remaining' => strlen($packet->ack), 'trace_id' => $traceId, 'started' => $readStarted];
+                                $clients[$id]['acks'][array_key_last($clients[$id]['acks'])] += ['packet_type' => $packet->type,
+                                    'ack_hex' => strtoupper(bin2hex($packet->ack))];
                                 $this->record('ACK_QUEUED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type,
                                     'bytes' => strlen($packet->ack)]);
                                 $this->flushAcks($clients, $id, $close);
@@ -426,6 +444,8 @@ class DiagnoseGps extends Command
             } else {
                 HardwareTelemetry::phase('ack_sent', ['trace_id' => $ack['trace_id'], 'device_id' => $clients[$id]['device_id'],
                     'duration_ms' => (hrtime(true) - $ack['started']) / 1000000]);
+                app(LiveDiagnosticStream::class)->append($clients[$id]['imei'], 'ACK_SENT', ['packet_type' => $ack['packet_type'] ?? null,
+                    'ack_hex' => $ack['ack_hex'] ?? null, 'bytes' => strlen($ack['ack_hex'] ?? '') / 2]);
             }
             unset($ack);
             array_shift($clients[$id]['acks']);

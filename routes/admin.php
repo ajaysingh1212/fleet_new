@@ -48,6 +48,9 @@ Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(
         Route::put('vehicle-geofences/{id}', [VehicleGeofenceController::class, 'update'])->whereNumber('id')->name('vehicle-geofences.update');
         Route::patch('vehicle-geofences/{id}/status', [VehicleGeofenceController::class, 'status'])->whereNumber('id')->name('vehicle-geofences.status');
         Route::get('gps-devices/diagnostics', [GpsDeviceController::class, 'diagnostics'])->name('gps-devices.diagnostics');
+        Route::get('gps-devices/diagnostics/live', [GpsDeviceController::class, 'diagnosticsLive'])->name('gps-devices.diagnostics.live');
+        Route::get('gps-devices/diagnostics/stream', [GpsDeviceController::class, 'diagnosticsStream'])
+            ->middleware(['can:manage,App\Models\GpsDevice', 'throttle:60,1,gps-diagnostics-stream'])->name('gps-devices.diagnostics.stream');
         Route::get('gps-devices/fleet', [GpsDeviceController::class, 'fleet'])->name('gps-devices.fleet');
         Route::get('gps-devices/{gpsDevice}/documents/{index}', [GpsDeviceController::class, 'document'])->whereNumber('index')->name('gps-devices.document');
         Route::resource('gps-devices', GpsDeviceController::class)->except('destroy')->parameters(['gps-devices' => 'gpsDevice']);

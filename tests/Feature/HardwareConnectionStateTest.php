@@ -35,6 +35,20 @@ class HardwareConnectionStateTest extends TestCase
             'status' => 'active', 'protocol' => 'pt06', 'protocol_version' => '2022.4.27-v2', 'last_packet_at' => now()]);
     }
 
+    public function test_configured_slow_reporter_stays_online_through_its_evidence_based_grace_window(): void
+    {
+        $d = $this->device();
+        $d->update(['configuration' => ['heartbeat_interval' => 120], 'last_packet_at' => now()]);
+        $this->travel(181)->seconds();
+
+        $state = app(HardwareFleet::class)->snapshot()[0];
+        $this->assertTrue($state['online']);
+        $this->assertSame(390, $state['idle_seconds']);
+        $this->travel(210)->seconds();
+        $this->assertFalse($d->fresh()->is_online);
+        $this->assertSame('offline', app(HardwareFleet::class)->snapshot()[0]['state']);
+    }
+
     public function test_close_does_not_imply_device_offline_and_queued_packets_cannot_reopen_the_socket(): void
     {
         $d = $this->device();

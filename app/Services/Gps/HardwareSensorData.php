@@ -9,7 +9,7 @@ final class HardwareSensorData
     public static function forDisplay(array $telemetry): array
     {
         return array_intersect_key($telemetry, array_flip([
-            'acc', 'external_voltage', 'battery_voltage', 'power_level', 'gsm_signal',
+            'acc', 'external_power', 'external_voltage', 'battery_voltage', 'power_level', 'gsm_signal',
             'gsm_signal_level', 'odometer_m', 'gps_positioned_reported', 'charging',
             'gsm_level', 'gsm_description', 'power_description', 'relay_disconnected',
             'defense_active', 'sos', 'alarm_code',

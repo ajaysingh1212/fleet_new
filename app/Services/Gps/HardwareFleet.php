@@ -66,6 +66,7 @@ final class HardwareFleet
     public function device(GpsDevice $device): array
     {
         $presence = app(HardwareConnectionState::class)->snapshot($device->id);
+        $availabilitySeconds = app(HardwareAvailability::class)->seconds($device->configuration);
         $lastPacket = $device->last_packet_at;
         if (! empty($presence['connection_last_packet_at'])) {
             $received = CarbonImmutable::parse($presence['connection_last_packet_at']);
@@ -73,7 +74,7 @@ final class HardwareFleet
                 $lastPacket = $received;
             }
         }
-        $online = $device->status === 'active' && $lastPacket?->gt(now()->subSeconds(config('gps.idle_seconds')));
+        $online = $device->status === 'active' && $lastPacket?->gte(now()->subSeconds($availabilitySeconds));
         $position = $device->latestLocation;
         $heartbeat = $device->latestHeartbeat;
         $telemetry = $heartbeat ? json_decode($heartbeat->telemetry, true) : [];
@@ -84,7 +85,7 @@ final class HardwareFleet
         $accFromHeartbeat = $heartbeatNewer ? isset($telemetry['acc']) : ! isset($positionAcc);
         $accReportedAt = $accFromHeartbeat && $heartbeat
             ? CarbonImmutable::parse($heartbeat->received_at, 'UTC') : $position?->recorded_at;
-        $accFresh = $acc !== null && $accReportedAt?->gte(now()->subSeconds(config('gps.idle_seconds')));
+        $accFresh = $acc !== null && $accReportedAt?->gte(now()->subSeconds($availabilitySeconds));
         $reportedAcc = $acc;
         // An old ignition report is historical evidence, not current ignition.
         if (! $accFresh) {
@@ -92,7 +93,10 @@ final class HardwareFleet
         }
         $fresh = $position && $position->recorded_at->gte(now()->subSeconds(config('gps.fresh_seconds', 15)));
         $heartbeatFresh = $heartbeat && CarbonImmutable::parse($heartbeat->received_at, 'UTC')
-            ->gte(now()->subSeconds(config('gps.idle_seconds')));
+            ->gte(now()->subSeconds($availabilitySeconds));
+        $power = HardwareSensorData::forDisplay($telemetry ?? []);
+        $powerAt = $heartbeat ? CarbonImmutable::parse($heartbeat->received_at, 'UTC') : null;
+        $powerFresh = $powerAt?->gte(now()->subSeconds(config('gps.idle_seconds'))) ?? false;
         $reportedFix = $heartbeatNewer && $heartbeatFresh ? ($telemetry['gps_positioned_reported'] ?? null) : null;
         $gpsState = ! $position ? 'awaiting_gps' : ($reportedFix === false ? 'no_gps_fix' : (! $fresh ? 'stale_gps' : 'fresh'));
         // Parking is an ignition/movement state, independent of the age of the
@@ -105,6 +109,17 @@ final class HardwareFleet
             ['latitude' => null, 'longitude' => null, 'recorded_at' => null, 'received_at' => null, 'speed' => null, 'heading' => null]),
             'device_id' => $device->id, 'imei' => $device->identifier, 'name' => $device->name,
             'protocol' => $device->protocol, 'model' => $device->model,
+            'manufacturer' => $device->manufacturer,
+            // Protocol is only marked detected after an authenticated packet
+            // matched the registered protocol/version. Model is never inferred
+            // from a GT06-shaped frame.
+            'configured_protocol' => $device->protocol,
+            'configured_protocol_version' => $device->protocol_version,
+            'detected_protocol' => $lastPacket ? $device->protocol : null,
+            'protocol_identity' => $lastPacket ? 'configured_and_packet_validated' : 'configured_not_yet_validated',
+            'configured_model' => $device->model,
+            'reported_model' => null,
+            'model_identity' => $device->model ? 'configured' : 'unknown_unverified',
             'vehicle_id' => $device->vehicle_id, 'registration' => $device->vehicle?->registration_number,
             'vehicle_type' => strtolower($device->vehicle?->details['type'] ?? 'vehicle'),
             'vehicle_icon' => config('fleet.icons.'.($device->vehicle?->details['icon'] ?? $device->vehicle?->details['type'] ?? 'car').'.icon', 'fa-car-side'),
@@ -118,8 +133,18 @@ final class HardwareFleet
             'gps_reported_at' => $heartbeat ? CarbonImmutable::parse($heartbeat->received_at, 'UTC')->toIso8601String() : null,
             'heartbeat_sensors' => HardwareSensorData::forDisplay($telemetry ?? []),
             'heartbeat_reported_at' => $heartbeat ? CarbonImmutable::parse($heartbeat->received_at, 'UTC')->toIso8601String() : null,
+            'power_sensors' => $power,
+            'power_reported_at' => $powerAt?->toIso8601String(),
+            'charging' => $power['charging'] ?? null,
+            'external_power' => $power['external_power'] ?? null,
+            'external_voltage' => $power['external_voltage'] ?? null,
+            'battery_voltage' => $power['battery_voltage'] ?? null,
+            'power_level' => $power['power_level'] ?? null,
+            'power_description' => $power['power_description'] ?? null,
+            'charging_current' => $powerFresh ? ($power['charging'] ?? null) : null,
+            'external_power_current' => $powerFresh ? ($power['external_power'] ?? null) : null,
             'gps_fresh' => (bool) $fresh && $reportedFix !== false, 'gps_positioned_reported' => $reportedFix,
-            'gps_fresh_seconds' => config('gps.fresh_seconds', 15), 'idle_seconds' => config('gps.idle_seconds'),
+            'gps_fresh_seconds' => config('gps.fresh_seconds', 15), 'idle_seconds' => $availabilitySeconds,
             'reconnect_seconds' => config('gps.reconnect_seconds', 30)];
     }
 }

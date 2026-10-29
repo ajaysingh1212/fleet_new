@@ -42,7 +42,7 @@ final class LocalHardwareRecorder
             $queue->push(new DeliverHardwarePacket($job, $connection, (bool) config('gps.local_broadcast')), '', config('gps.live_queue'));
             app(HardwareConnectionState::class)->touch($device->id, $session);
 
-            HardwareTelemetry::phase('packet_accepted', ['trace_id' => $traceId, 'device_id' => $device->id,
+            HardwareTelemetry::phase('queue_dispatched', ['trace_id' => $traceId, 'device_id' => $device->id,
                 'session_id' => $session, 'type' => $packet->type, 'received_at' => $receivedAt]);
 
             return $device->id;
@@ -56,6 +56,9 @@ final class LocalHardwareRecorder
                 $packet->version, $packet->type, hash('sha256', $frame),
                 array_map(fn ($location) => $location->toArray(), $packet->locations), $packet->events,
                 CarbonImmutable::parse($receivedAt)->utc()->format('Y-m-d H:i:s'), $device->vehicle_id, (bool) config('gps.local_broadcast'), $receivedAt, $traceId))->handle();
+
+            HardwareTelemetry::phase('database_written_inline', ['trace_id' => $traceId, 'device_id' => $device->id,
+                'session_id' => $session, 'type' => $packet->type, 'received_at' => $receivedAt]);
 
             return $device->id;
         });

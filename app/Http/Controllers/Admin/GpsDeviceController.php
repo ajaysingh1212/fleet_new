@@ -9,8 +9,12 @@ use App\Models\GpsDeviceLocation;
 use App\Models\Vehicle;
 use App\Services\Gps\HardwareFleet;
 use App\Services\Gps\HardwareRegistrationService;
+use App\Services\Gps\LiveDiagnosticStream;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -131,7 +135,76 @@ class GpsDeviceController extends Controller
     {
         $this->authorize('viewAny', GpsDevice::class);
 
-        return view('admin.gps-devices.diagnostics', ['diagnostics' => DB::table('gps_packet_diagnostics')->orderByDesc('id')->paginate(50)]);
+        return view('admin.gps-devices.diagnostics');
+    }
+
+    public function diagnosticsLive(Request $request)
+    {
+        $this->authorize('viewAny', GpsDevice::class);
+        $data = $request->validate(['device_id' => 'nullable|integer|min:1']);
+        $devices = app(HardwareFleet::class)->page();
+        if (! empty($data['device_id'])) {
+            $devices['devices'] = array_values(array_filter($devices['devices'], fn (array $device) => $device['device_id'] === $data['device_id']));
+        }
+        $ids = array_values(array_filter(array_column($devices['devices'], 'device_id')));
+        $sessions = $ids ? DB::table('gps_connection_sessions')->whereIn('gps_device_id', $ids)
+            ->orderByDesc('connected_at')->get(['gps_device_id', 'connected_at', 'disconnected_at'])->groupBy('gps_device_id') : collect();
+        foreach ($devices['devices'] as &$device) {
+            $last = $device['device_id'] ? $sessions->get($device['device_id'])?->first() : null;
+            $device['last_connection_at'] = $last?->connected_at;
+            $device['last_disconnect_at'] = $last?->disconnected_at;
+        }
+        unset($device);
+
+        $receiver = null;
+        try { $receiver = Cache::store(config('gps.live_cache_store'))->get('gps.receiver.health'); } catch (\Throwable) {}
+        $database = ['status' => 'connected', 'latency_ms' => null];
+        try {
+            $started = hrtime(true); DB::select('select 1');
+            $database['latency_ms'] = round((hrtime(true) - $started) / 1000000, 2);
+        } catch (\Throwable) { $database = ['status' => 'error', 'latency_ms' => null]; }
+        $redis = ['status' => 'unknown', 'latency_ms' => null];
+        try {
+            $started = hrtime(true); $pong = Redis::connection('gps')->ping();
+            $redis = ['status' => (strtoupper((string) $pong) === 'PONG' || $pong === true) ? 'connected' : 'error',
+                'latency_ms' => round((hrtime(true) - $started) / 1000000, 2)];
+        } catch (\Throwable) { $redis = ['status' => 'error', 'latency_ms' => null]; }
+        $reverb = ['status' => 'unknown'];
+        $host = config('reverb.servers.reverb.host', env('REVERB_HOST', '127.0.0.1'));
+        $port = (int) config('reverb.servers.reverb.port', env('REVERB_PORT', 8080));
+        try {
+            $probe = @stream_socket_client('tcp://'.$host.':'.$port, $errno, $error, 0.3);
+            $reverb = ['status' => is_resource($probe) ? 'reachable' : 'error'];
+            if (is_resource($probe)) fclose($probe);
+        } catch (\Throwable) { $reverb = ['status' => 'error']; }
+        $queues = [];
+        foreach ([[config('gps.live_connection'), config('gps.live_queue')], [config('gps.live_connection'), config('gps.persistence_queue')], [config('gps.broadcast_connection'), config('gps.broadcast_queue')]] as [$connection, $queue]) {
+            try { $queues[] = ['name' => $queue, 'depth' => Queue::connection($connection)->size($queue), 'available' => true]; }
+            catch (\Throwable) { $queues[] = ['name' => $queue, 'depth' => null, 'available' => false]; }
+        }
+
+        $failed = null;
+        try { $failed = DB::table('failed_jobs')->whereIn('queue', [config('gps.live_queue'), config('gps.persistence_queue'), config('gps.broadcast_queue')])->count(); } catch (\Throwable) {}
+        $pipeline = null;
+        try { $pipeline = Cache::store(config('gps.live_cache_store'))->get('gps.pipeline.health'); } catch (\Throwable) {}
+        return response()->json(['observed_at' => now()->utc()->toIso8601String(), 'devices' => $devices['devices'],
+            'health' => ['receiver' => $receiver, 'database' => $database, 'redis' => $redis, 'reverb' => $reverb,
+                'queues' => $queues, 'failed_gps_jobs' => $failed, 'pipeline' => $pipeline]])
+            ->header('Cache-Control', 'private, no-store');
+    }
+
+    public function diagnosticsStream(Request $request, LiveDiagnosticStream $stream)
+    {
+        $this->authorize('manage', GpsDevice::class);
+        $data = $request->validate(['device_id' => 'nullable|integer|min:1', 'after' => 'nullable|uuid']);
+        $imei = null;
+        if (! empty($data['device_id'])) {
+            $imei = GpsDevice::whereKey($data['device_id'])->value('identifier');
+            abort_unless($imei, 404);
+        }
+
+        return response()->json(['events' => $stream->read($imei, $data['after'] ?? null)])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function document(GpsDevice $gpsDevice, int $index)
