@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\GeofenceController;
 use App\Http\Controllers\Admin\GeoLookupController;
 use App\Http\Controllers\Admin\GlobalSearchController;
 use App\Http\Controllers\Admin\GpsDeviceController;
+use App\Http\Controllers\Admin\GpsDeviceCommandController;
 use App\Http\Controllers\Admin\HardwareGpsHistoryController;
 use App\Http\Controllers\Admin\LanguageController;
 use App\Http\Controllers\Admin\LicensePlanController;
@@ -30,6 +31,10 @@ use App\Http\Controllers\Admin\VehicleGeofenceController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('gps-devices/{gpsDevice}/commands', [GpsDeviceCommandController::class, 'index'])
+        ->middleware(['can:manage,App\Models\GpsDevice', 'throttle:60,1,gps-command-read'])->name('gps-devices.commands.index');
+    Route::post('gps-devices/{gpsDevice}/commands', [GpsDeviceCommandController::class, 'store'])
+        ->middleware(['can:manage,App\Models\GpsDevice', 'throttle:6,1,gps-command-write'])->name('gps-devices.commands.store');
     Route::middleware(['can:viewAny,App\Models\GpsDevice', 'throttle:60,1'])->group(function () {
         Route::get('monitoring/history', [HardwareGpsHistoryController::class, 'index'])->name('monitoring.history');
         Route::get('monitoring/history/targets', [HardwareGpsHistoryController::class, 'targets'])->name('monitoring.history.targets');

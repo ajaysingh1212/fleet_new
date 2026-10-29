@@ -54,6 +54,7 @@ class SuperviseGpsWorkers extends Command
             unlink($stopFile);
         }
         $stopping = false;
+        $ready = false;
         if (function_exists('pcntl_async_signals')) {
             pcntl_async_signals(true);
             pcntl_signal(SIGTERM, function () use (&$stopping) {
@@ -125,6 +126,10 @@ class SuperviseGpsWorkers extends Command
                     $target = storage_path('framework/gps-workers-status.json');
                     file_put_contents($target.'.tmp', json_encode(['updated_at' => now()->utc()->toIso8601String(), 'queues' => $status], JSON_THROW_ON_ERROR));
                     rename($target.'.tmp', $target);
+                    if (! $ready && ! in_array(false, array_column($status, 'available'), true)) {
+                        $this->info('GPS worker supervisor ready');
+                        $ready = true;
+                    }
                     usleep($interval * 1000000);
                 }
             } while ((! $stopping || array_sum(array_map('count', $workers)) > 0) && ! $this->option('once'));

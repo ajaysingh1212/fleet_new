@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>{{ config('app.name', 'Eemotrack Fleet') }}</title>
+    <title>{{ config('app.name', 'FleetNova Fleet') }}</title>
 
     @verbatim
     <style>
@@ -140,7 +140,7 @@
             <div class="brand">
                 <div class="brand-mark" aria-hidden="true">✦</div>
                 <div>
-                    <div class="brand-name">{{ strtoupper(config('app.name', 'EEMOTRACK')) }}</div>
+                    <div class="brand-name">{{ strtoupper(config('app.name', 'FleetNova')) }}</div>
                     <div class="brand-sub">Global Fleet Intelligence</div>
                 </div>
             </div>
@@ -189,7 +189,7 @@
         </div>
 
         <footer class="bottom-bar">
-            <div class="bottom-caption">Eemotrack · Fleet intelligence system</div>
+            <div class="bottom-caption">FleetNova · Fleet intelligence system</div>
             <div class="bottom-stats">
                 <span><i class="live-dot"></i> System <b>Operational</b></span>
                 <span>GPS <b>Connected</b></span>

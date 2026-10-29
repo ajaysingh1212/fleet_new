@@ -12,6 +12,7 @@ use App\Services\Gps\Gateway\Protocols\Pt06;
 use App\Services\Gps\Gateway\TcpListenerLease;
 use App\Services\Gps\HardwareConnectionState;
 use App\Services\Gps\HardwareTelemetry;
+use App\Services\Gps\DeviceCommands;
 use App\Services\Gps\LocalHardwareRecorder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -71,6 +72,7 @@ class DiagnoseGps extends Command
         $lastStatus = 0;
         $lastHealth = 0;
         $lastData = null;
+        $lastCommandPoll = 0;
         $lastFix = null;
         $deviceStates = [];
         foreach ($imeis as $allowedImei) {
@@ -83,6 +85,13 @@ class DiagnoseGps extends Command
             $this->record('DISCONNECTED', ['peer' => $clients[$id]['peer'], 'imei' => $clients[$id]['imei'], 'reason' => $reason,
                 'received_bytes' => $clients[$id]['bytes'], 'packets' => $clients[$id]['packets']]);
             HardwareTelemetry::phase('socket_closed', ['device_id' => $clients[$id]['device_id'], 'session_id' => $clients[$id]['session_id'], 'reason' => $reason]);
+            if ($profile === 'pt06' && $this->option('persist') && $clients[$id]['device_id']) {
+                try {
+                    app(DeviceCommands::class)->disconnected($clients[$id]['device_id'], $clients[$id]['session_id'], $reason);
+                } catch (Throwable) {
+                    $this->record('COMMAND_STORAGE_ERROR', ['reason' => 'disconnect_update_failed']);
+                }
+            }
             if ($this->option('persist')) {
                 try {
                     $presenceDeviceId = $clients[$id]['imei'] ? DB::table('gps_devices')->where('identifier', $clients[$id]['imei'])->value('id') : null;
@@ -116,12 +125,34 @@ class DiagnoseGps extends Command
                         if ($client['device_id']) {
                             try {
                                 app(HardwareConnectionState::class)->keepAlive($client['device_id'], $client['session_id']);
+                                if ($profile === 'pt06') {
+                                    app(DeviceCommands::class)->connected($client['device_id'], $client['session_id']);
+                                }
                             } catch (Throwable) {
                             }
                         }
                     }
                     HardwareTelemetry::receiver($port, count($clients), count(array_filter($clients, fn ($client) => $client['imei'] !== null)));
                     $lastHealth = time();
+                }
+                if ($profile === 'pt06' && $this->option('persist') && time() !== $lastCommandPoll) {
+                    $lastCommandPoll = time();
+                    foreach ($clients as $id => $client) {
+                        if (! $client['device_id'] || ! $client['imei'] || $client['out'] !== '') {
+                            continue;
+                        }
+                        try {
+                            $nextSerial = $client['last_serial'] === null ? null : (($client['last_serial'] + 1) & 0xFFFF);
+                            $command = app(DeviceCommands::class)->claim($client['device_id'], $client['imei'], $client['session_id'], $nextSerial);
+                            if ($command) {
+                                $clients[$id]['out'] .= $command['frame'];
+                                $clients[$id]['acks'][] = ['remaining' => strlen($command['frame']), 'command_id' => $command['id']];
+                                $this->record('COMMAND_QUEUED', ['device_id' => $client['device_id'], 'command_id' => $command['id']]);
+                            }
+                        } catch (Throwable) {
+                            $this->record('COMMAND_STORAGE_ERROR', ['reason' => 'command_dispatch_failed']);
+                        }
+                    }
                 }
                 $read = [$server];
                 $write = [];
@@ -149,7 +180,7 @@ class DiagnoseGps extends Command
                         stream_set_blocking($socket, false);
                         $clients[(int) $socket] = ['socket' => $socket, 'peer' => $peer, 'in' => '', 'out' => '',
                             'session_id' => (string) Str::uuid(), 'connected_at' => now()->utc()->format('Y-m-d H:i:s'),
-                            'imei' => null, 'device_id' => null, 'acks' => [], 'activity' => time(), 'bytes' => 0, 'packets' => 0, 'window' => time(), 'window_bytes' => 0];
+                            'imei' => null, 'device_id' => null, 'last_serial' => null, 'acks' => [], 'activity' => time(), 'bytes' => 0, 'packets' => 0, 'window' => time(), 'window_bytes' => 0];
                         $totals['connections']++;
                         $this->record('CONNECTED', ['peer' => $peer, 'connected_now' => count($clients)]);
                         HardwareTelemetry::phase('socket_opened', ['session_id' => $clients[(int) $socket]['session_id']]);
@@ -157,10 +188,24 @@ class DiagnoseGps extends Command
                         continue;
                     }
                     $id = (int) $socket;
+                    if (! isset($clients[$id])) {
+                        continue;
+                    }
                     try {
                         // Bound bytes per turn rather than discard a valid burst.
+                        error_clear_last();
                         $bytes = @fread($socket, 128);
-                        if ($bytes === false || ($bytes === '' && feof($socket))) {
+                        if ($bytes === false) {
+                            $message = error_get_last()['message'] ?? '';
+                            $nativeSocket = @socket_import_stream($socket);
+                            $code = $nativeSocket === false ? 0 : socket_last_error($nativeSocket);
+                            $reset = $code === 10054 || $code === 104
+                                || preg_match('/10054|ECONNRESET|connection reset|forcibly closed/i', $message);
+                            $close($id, $reset ? 'connection_reset_by_peer' : 'socket_read_failed');
+
+                            continue;
+                        }
+                        if ($bytes === '' && feof($socket)) {
                             $close($id, 'peer_closed');
 
                             continue;
@@ -190,6 +235,7 @@ class DiagnoseGps extends Command
                         }
                         $frames = 0;
                         while (($frame = $framer->extract($clients[$id]['in'])) !== null) {
+                                $clients[$id]['last_serial'] = unpack('n', substr($frame, -6, 2))[1];
                             $traceId = bin2hex(random_bytes(8));
                             HardwareTelemetry::phase('packet_received', ['trace_id' => $traceId, 'session_id' => $clients[$id]['session_id'],
                                 'received_at' => $receivedAt, 'bytes' => strlen($frame)]);
@@ -247,12 +293,25 @@ class DiagnoseGps extends Command
                                     break;
                                 }
                                 $clients[$id]['imei'] = $packet->identifier;
+                                // A reconnect replaces old sockets for this tracker;
+                                // commands must never be routed to a stale session.
+                                foreach (array_keys($clients) as $otherId) {
+                                    if ($otherId !== $id && $clients[$otherId]['imei'] === $packet->identifier) {
+                                        $close($otherId, 'replaced_by_new_connection');
+                                    }
+                                }
                                 $this->record('PACKET_DETAILS', ['peer' => $clients[$id]['peer'], 'imei' => $packet->identifier, ...$packetDetails]);
                             }
                             if ($this->option('persist')) {
                                 $clients[$id]['device_id'] = app(LocalHardwareRecorder::class)->record($packet, $frame, $clients[$id]['imei'], $profile,
                                     $clients[$id]['session_id'], $clients[$id]['connected_at'], $clients[$id]['peer'], $receivedAt, $traceId);
                                 $this->record(config('gps.live_first') ? 'PACKET_QUEUED' : 'DATABASE_SAVED', ['imei' => $clients[$id]['imei'], 'type' => $packet->type]);
+                                if ($profile === 'pt06') {
+                                    app(DeviceCommands::class)->connected($clients[$id]['device_id'], $clients[$id]['session_id']);
+                                    if ($packet->type === 'command_response') {
+                                        app(DeviceCommands::class)->reply($clients[$id]['device_id'], $clients[$id]['session_id'], $packet->events);
+                                    }
+                                }
                             }
                             if ($packet->ack !== '') {
                                 $clients[$id]['out'] .= $packet->ack;
@@ -357,8 +416,17 @@ class DiagnoseGps extends Command
                 unset($ack);
                 break;
             }
-            HardwareTelemetry::phase('ack_sent', ['trace_id' => $ack['trace_id'], 'device_id' => $clients[$id]['device_id'],
-                'duration_ms' => (hrtime(true) - $ack['started']) / 1000000]);
+            if (isset($ack['command_id'])) {
+                try {
+                    app(DeviceCommands::class)->sent($ack['command_id']);
+                    $this->record('COMMAND_SENT', ['device_id' => $clients[$id]['device_id'], 'command_id' => $ack['command_id']]);
+                } catch (Throwable) {
+                    $this->record('COMMAND_STORAGE_ERROR', ['reason' => 'sent_update_failed']);
+                }
+            } else {
+                HardwareTelemetry::phase('ack_sent', ['trace_id' => $ack['trace_id'], 'device_id' => $clients[$id]['device_id'],
+                    'duration_ms' => (hrtime(true) - $ack['started']) / 1000000]);
+            }
             unset($ack);
             array_shift($clients[$id]['acks']);
         }

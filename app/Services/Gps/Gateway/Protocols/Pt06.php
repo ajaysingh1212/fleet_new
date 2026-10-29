@@ -69,6 +69,10 @@ final class Pt06 implements Protocol
 
         return match ($type) {
             0x13 => $this->heartbeat($payload, $serial),
+            // BR52C6695 identifies as PT06 but transmits its GPS/LBS fixes in
+            // the legacy GT06 0x12 layout. Decode that documented layout so a
+            // valid fix is persisted instead of being discarded as unsupported.
+            0x12 => $this->legacyGt06Location($frame),
             0x22 => $this->position($payload, $serial),
             0x26 => $this->alarm($payload, $serial),
             0x24 => $this->lbs($payload),
@@ -80,6 +84,16 @@ final class Pt06 implements Protocol
             default => new Packet('unsupported', null, self::VERSION, events: ['protocol_type' => sprintf('0x%02X', $type),
                 'payload_hex' => strtoupper(bin2hex($payload)), 'decode_status' => 'Layout not defined by supplied PT06 manual; no ACK sent']),
         };
+    }
+
+    private function legacyGt06Location(string $frame): Packet
+    {
+        $legacy = (new Gt06)->decode($frame, true);
+
+        return new Packet('location', null, self::VERSION, $legacy->ack, $legacy->locations, [
+            ...$legacy->events,
+            'wire_format' => 'legacy_gt06_0x12',
+        ]);
     }
 
     private function login(string $payload, string $serial, bool $authenticated, bool $extended): Packet

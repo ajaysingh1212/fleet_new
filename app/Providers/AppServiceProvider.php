@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Console\Commands\ServeWithGps;
 use App\Interfaces\Repositories\ActivityLogRepositoryInterface;
 use App\Interfaces\Repositories\AuditLogRepositoryInterface;
 use App\Interfaces\Repositories\LicensePlanRepositoryInterface;
@@ -49,6 +50,7 @@ use App\Repositories\UserLicenseRepository;
 use App\Repositories\UserRepository;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Gate;
@@ -64,6 +66,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(ServeCommand::class, ServeWithGps::class);
         $this->app->bind(ActivityLogRepositoryInterface::class, ActivityLogRepository::class);
         $this->app->bind(AuditLogRepositoryInterface::class, AuditLogRepository::class);
         $this->app->bind(LicensePlanRepositoryInterface::class, LicensePlanRepository::class);

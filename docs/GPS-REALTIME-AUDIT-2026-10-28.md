@@ -217,8 +217,8 @@ Windows scheduled task under the intended service account.
 Linux examples in `deploy/gps/` are **templates, not installed services**. Set
 working directory/user to the actual release, ensure writable storage and the
 correct private environment, then install the three units in `/etc/systemd/system`,
-run `systemctl daemon-reload`, and enable/start `eemotrack-gps-receiver`,
-`eemotrack-gps-workers`, `eemotrack-reverb`. Reverb binds loopback for a configured
+run `systemctl daemon-reload`, and enable/start `FleetNova-gps-receiver`,
+`FleetNova-gps-workers`, `FleetNova-reverb`. Reverb binds loopback for a configured
 TLS reverse proxy. Do not start another receiver on an occupied production port.
 Keep the registered PT06 path until the actual device profile is verified.
 

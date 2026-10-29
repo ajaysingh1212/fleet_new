@@ -1,5 +1,5 @@
 [Unit]
-Description=Eemotrack private WebSocket broadcast server
+Description=FleetNova private WebSocket broadcast server
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/srv/eemotrack
+WorkingDirectory=/srv/FleetNova
 ExecStart=/usr/bin/php artisan reverb:start --host=127.0.0.1 --port=8080
 Restart=on-failure
 RestartSec=3

@@ -1,5 +1,5 @@
 [Unit]
-Description=Eemotrack authenticated PT06 TCP receiver
+Description=FleetNova authenticated PT06 TCP receiver
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/srv/eemotrack
+WorkingDirectory=/srv/FleetNova
 ExecStart=/usr/bin/php artisan gps:listen --host=0.0.0.0 --port=9000 --diagnostic --persist --registered --diagnostic-protocol=pt06 --format=json
 Restart=on-failure
 RestartSec=3

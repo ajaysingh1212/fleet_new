@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>{{ config('app.name', 'Eemotrack Fleet') }}</title>
+    <title>{{ config('app.name', 'FleetNova Fleet') }}</title>
 
     @verbatim
     <style>
@@ -283,17 +283,17 @@
     @endverbatim
 </head>
 <body>
-    <section class="globe-section" aria-label="Eemotrack fleet login">
+    <section class="globe-section" aria-label="FleetNova fleet login">
         <canvas id="globe" aria-label="Interactive animated globe"></canvas>
         <div class="ambient"></div>
         <div class="vignette"></div>
         <div class="scanline" aria-hidden="true"></div>
 
         <header class="topbar login-topbar">
-            <a class="brand" href="{{ url('/') }}" aria-label="{{ config('app.name', 'Eemotrack') }} home">
+            <a class="brand" href="{{ url('/') }}" aria-label="{{ config('app.name', 'FleetNova') }} home">
                 <div class="brand-mark" aria-hidden="true">✦</div>
                 <div>
-                    <div class="brand-name">{{ strtoupper(config('app.name', 'EEMOTRACK')) }}</div>
+                    <div class="brand-name">{{ strtoupper(config('app.name', 'FleetNova')) }}</div>
                     <div class="brand-sub">Global Fleet Intelligence</div>
                 </div>
             </a>
@@ -386,7 +386,7 @@
         </aside>
 
         <footer class="bottom-bar login-bottom">
-            <div class="bottom-caption">Eemotrack <span>·</span> Fleet intelligence system</div>
+            <div class="bottom-caption">FleetNova <span>·</span> Fleet intelligence system</div>
             <div class="bottom-stats">
                 <span><i class="live-dot"></i> Network <b>Operational</b></span>
                 <span>GPS <b>Connected</b></span>

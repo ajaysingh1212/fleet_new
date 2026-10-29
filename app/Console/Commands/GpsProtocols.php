@@ -17,7 +17,7 @@ class GpsProtocols extends Command
             $rows[] = [$name, implode(', ', $info['versions']) ?: 'none', $info['status']];
         }
         $this->table(['Protocol', 'Versions', 'Verification'], $rows);
-        $this->line('TG1 mobile: preserved separately via gps:listen-mobile / gps:listen --mobile. UDP and remote commands are not implemented.');
+        $this->line('TG1 mobile: preserved separately via gps:listen-mobile / gps:listen --mobile. UDP is not implemented. PT06 commands are available through the local persistent diagnostic receiver; see docs/GPS-DEVICE-COMMANDS.md.');
 
         return self::SUCCESS;
     }

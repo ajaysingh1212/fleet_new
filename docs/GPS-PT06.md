@@ -31,8 +31,9 @@ the response. No reporting interval or device configuration command is sent.
 
 Framing accepts `7878` one-byte length and `7979` two-byte length. Both validate
 declared length, CRLF and CRC-ITU/X25 before decoding. Short and extended packets
-can be fragmented across TCP reads or coalesced in one read. Outbound commands
-such as relay control, reboot, phone configuration and fences are not sent.
+can be fragmented across TCP reads or coalesced in one read. The explicit local
+command panel now supports administrator-requested PT06 commands and correlated
+replies; see GPS-DEVICE-COMMANDS.md. No command is sent automatically on login.
 
 The GPS scale is unsigned raw / 1,800,000, with hemisphere signs from course/status.
 GPS timestamps are UTC regardless of login timezone. A heartbeat's GPS-positioned

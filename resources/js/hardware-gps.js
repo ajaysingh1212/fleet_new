@@ -8,6 +8,7 @@ import {initFleetConsole} from './fleet-console.js';
 import {warningLabel} from './fleet-geofence-alerts.js';
 import {browserReceived, markerDrawn} from './gps-pipeline-metrics.js';
 import {vehicleIcon} from './vehicle-icons.js';
+import {createDeviceCommandDialog} from './gps-device-commands.js';
 
 const colors = {moving: '#16803c', idle: '#c77c00', parked: '#2563eb', stopped: '#2563eb', offline: '#64748b', stale_gps: '#a16207', awaiting_gps: '#a16207', no_gps_fix: '#a16207'};
 const car = '<path d="M5 15l2-6h10l2 6M4 15h16v6H4zM7 21v3m10-3v3M8 12h8"/>';
@@ -23,7 +24,8 @@ export function initHardwareGps() {
     const vehicles = new Map(), markers = new Map(), animations = new Map(), appearances = new Map(), rosterRows = new Map();
     const roster = document.getElementById('hardware-fleet-list');
     const status = document.getElementById('hardware-live-status');
-    let stopped = false, fitted = false, renderFrame = null, consoleUi = null;
+    const commandDialog = createDeviceCommandDialog();
+    let stopped = false, fitted = false, renderFrame = null, consoleUi = null, selectedVehicle = null;
     let meta = JSON.parse(container.dataset.meta);
     const cursors = [0];
     let liveState = 'connecting', navigation = null;
@@ -53,6 +55,11 @@ export function initHardwareGps() {
             `Coordinates: ${p.latitude}, ${p.longitude}`]) {
             const line = document.createElement('div'); line.textContent = text; node.append(line);
         }
+        if (p.vehicle_id) { const profile=document.createElement('a'); profile.href=`/admin/vehicles/${Number(p.vehicle_id)}`; profile.textContent='Vehicle details'; node.append(profile, document.createElement('br')); }
+        if (p.device_id && p.protocol === 'pt06') {
+            const commands = document.createElement('button'); commands.type = 'button'; commands.className = 'fleet-command-button';
+            commands.textContent = 'Device commands'; commands.onclick = () => commandDialog.open(p); node.append(commands, document.createElement('br'));
+        }
         if(p.device_id){const manage=document.createElement('a');manage.href=`/admin/gps-devices/${Number(p.device_id)}/edit`;manage.textContent='Manage tracker / assign vehicle';node.append(manage);}
         return node;
     };
@@ -77,18 +84,63 @@ export function initHardwareGps() {
         const display = fleetPresentation(p);
         let button = rosterRows.get(id);
         if (!button) {
-            button = document.createElement('button');
-            button.type = 'button'; button.className = 'list-group-item list-group-item-action';
-            button.innerHTML = '<span class="fleet-device-title"></span><span class="fleet-device-meta"></span><span class="fleet-device-state"></span><span class="fleet-device-alert"></span>';
-            button.addEventListener('click', () => { const marker = markers.get(id); if (marker) { map.setView(marker.getLatLng(), 16); marker.openPopup(); } });
+            button = document.createElement('article');
+            button.className = 'list-group-item';
+            button.innerHTML = '<button type="button" class="fleet-device-select" aria-expanded="false"><span class="fleet-device-title"></span><span class="fleet-device-meta"></span><span class="fleet-device-state"></span><span class="fleet-device-alert"></span><span class="fleet-device-action">View vehicle details</span></button><div class="fleet-device-details" hidden></div>';
+            const detailsId = `fleet-details-${id.replace(':', '-')}`;
+            button.querySelector('.fleet-device-details').id = detailsId;
+            button.querySelector('.fleet-device-select').setAttribute('aria-controls', detailsId);
+            const commandButton = document.createElement('button'); commandButton.type = 'button'; commandButton.className = 'fleet-command-button';
+            commandButton.innerHTML = '<i class="fa-solid fa-terminal" aria-hidden="true"></i> Commands';
+            commandButton.setAttribute('aria-label', `Device commands for ${p.registration ?? p.name}`);
+            commandButton.onclick = () => commandDialog.open(vehicles.get(id));
+            button.insertBefore(commandButton, button.querySelector('.fleet-device-details'));
+            button.querySelector('.fleet-device-select').addEventListener('click', () => {
+                selectedVehicle = selectedVehicle === id ? null : id;
+                for (const [rowId, vehicle] of vehicles) renderRow(rowId, vehicle);
+                const marker = markers.get(id);
+                if (selectedVehicle === id && marker) { map.setView(marker.getLatLng(), 16); marker.openPopup(); }
+            });
             rosterRows.set(id, button); roster.append(button);
         }
-        const fields = {'.fleet-device-title':p.registration ?? p.name, '.fleet-device-meta':`${p.imei ?? 'Unassigned tracker'} ? ${p.driver_name ?? 'No driver'}`,
-            '.fleet-device-state':`${display.connection} ? ${display.movement} ? ${p.speed ?? '?'} km/h`,
+        const fields = {'.fleet-device-title':p.registration ?? p.name, '.fleet-device-meta':`${p.imei ?? 'Unassigned tracker'} · ${p.driver_name ?? 'No driver'}`,
+            '.fleet-device-state':`${display.connection} · ${display.movement} · ${p.speed ?? 'Unknown'} km/h`,
             '.fleet-device-alert':(consoleUi?.getAlerts(p.device_id) ?? []).map(a=>`${a.label ?? warningLabel(a.type)}: ${a.geofence_name}${a.historical ? ' - Last known location, GPS pending' : ''}`).join(' | ')};
         for(const [selector,value] of Object.entries(fields)){const node=button.querySelector(selector);if(node.textContent!==value)node.textContent=value;}
         button.title=`GPS: ${display.gps}`;
+        button.querySelector('.fleet-command-button').hidden = !p.device_id || p.protocol !== 'pt06';
         button.style.borderLeft = `4px solid ${consoleUi?.hasAlerts(p.device_id) ? '#ef4444' : colors[fleetState(p)] ?? '#64748b'}`;
+        const expanded = selectedVehicle === id;
+        button.querySelector('.fleet-device-select').setAttribute('aria-expanded', String(expanded));
+        button.querySelector('.fleet-device-action').textContent = expanded ? 'Hide vehicle details' : 'View vehicle details';
+        const details = button.querySelector('.fleet-device-details');
+        details.hidden = !expanded;
+        if (expanded) {
+            const date = value => value ? new Date(value).toLocaleString() : 'Not received';
+            const rows = [['Vehicle', p.registration ?? 'Not assigned'], ['Type', p.vehicle_type ?? 'Unknown'],
+                ['Driver', p.driver_name ?? 'Not assigned'], ['IMEI', p.imei ?? 'No tracker assigned'],
+                ['Model', p.model ?? 'Unknown'], ['Protocol', p.protocol ?? 'Unknown'],
+                ['Connection', display.connection], ['GPS', display.gps], ['ACC', display.acc],
+                ['Last communication', date(p.last_packet_at)], ['Last GPS fix', date(p.recorded_at)],
+                ['Location', point(p) ? `${p.latitude}, ${p.longitude}` : p.gps_positioned_reported === false
+                    ? 'Device is online but reports no GPS fix. Place it under open sky; use STATUS or prepare LJDW (wake GPS) in Commands.'
+                    : 'No valid GPS fix received yet. Vehicle details remain available.']];
+            const signature = JSON.stringify([rows, p.vehicle_id, p.device_id]);
+            if (details.dataset.signature !== signature) {
+                details.dataset.signature = signature;
+                const list = document.createElement('dl');
+                for (const [label, value] of rows) {
+                    const term = document.createElement('dt'), description = document.createElement('dd');
+                    term.textContent = label; description.textContent = value; list.append(term, description);
+                }
+                details.replaceChildren(list);
+                for (const [target, label] of [[p.vehicle_id ? `/admin/vehicles/${Number(p.vehicle_id)}` : null, 'Full vehicle profile'],
+                    [p.device_id ? `/admin/gps-devices/${Number(p.device_id)}` : null, 'Tracker details & history']]) {
+                    if (!target) continue;
+                    const link = document.createElement('a'); link.href = target; link.textContent = label; details.append(link);
+                }
+            }
+        }
     };
     const fit = () => {
         const points = [...vehicles.values()].filter(point).map(p => [p.latitude, p.longitude]);
@@ -195,7 +247,7 @@ export function initHardwareGps() {
         for (const p of vehicles.values()) queueUpdate(p);
     }, 1000);
     window.addEventListener('pagehide', () => {
-        stopped = true; clearInterval(timer); stream.dispose(); consoleUi?.dispose();
+        stopped = true; clearInterval(timer); stream.dispose(); consoleUi?.dispose(); commandDialog.dispose();
         if (renderFrame !== null) cancelAnimationFrame(renderFrame);
         animations.forEach(motion => motion.stop()); map.remove();
     }, {once: true});

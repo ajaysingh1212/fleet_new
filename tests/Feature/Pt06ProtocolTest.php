@@ -116,6 +116,20 @@ class Pt06ProtocolTest extends TestCase
         $this->assertStringNotContainsString('No coordinate-bearing packet received', $state->snapshot(true)['location_status']);
     }
 
+    public function test_pt06_accepts_legacy_gt06_location_wire_format(): void
+    {
+        $frame = hex2bin(trim(file_get_contents(base_path('tests/Fixtures/gps/gt06-location-official.hex'))));
+        $frame = substr($frame, 0, -4).pack('n', ConcoxX1::crc(substr($frame, 2, -4)))."\r\n";
+        $packet = (new Pt06)->decode($frame, true);
+
+        $this->assertSame('location', $packet->type);
+        $this->assertSame(Pt06::VERSION, $packet->version);
+        $this->assertSame('legacy_gt06_0x12', $packet->events['wire_format']);
+        $this->assertCount(1, $packet->locations);
+        $this->assertTrue($packet->locations[0]->latitude > 0);
+        $this->assertTrue($packet->locations[0]->longitude > 0);
+    }
+
     public function test_actual_capture_is_decoded_in_real_terminal_without_inventing_a_location(): void
     {
         $reservation = stream_socket_server('tcp://127.0.0.1:0', $errno, $error);
@@ -145,9 +159,12 @@ class Pt06ProtocolTest extends TestCase
             $socket = null;
             $this->assertSame(0, $process->wait());
             $output = $process->getOutput();
-            foreach (['decoded-device-summary-v2', 'DEVICE STATUS', 'EXTREMELY LOW', 'STRONG', 'NO GPS FIX', '4055434022540900', '89915426034022540908'] as $text) {
+            foreach (['decoded-device-summary-v2', 'DEVICE STATUS', 'EXTREMELY LOW', 'STRONG', 'NO GPS FIX'] as $text) {
                 $this->assertStringContainsString($text, $output);
             }
+            // Terminal telemetry intentionally redacts SIM subscriber identifiers.
+            $this->assertStringNotContainsString('4055434022540900', $output);
+            $this->assertStringNotContainsString('89915426034022540908', $output);
             $this->assertStringNotContainsString('https://maps.google.com', $output);
             $this->assertStringNotContainsString('PACKET NOT DECODED', $output);
         } finally {

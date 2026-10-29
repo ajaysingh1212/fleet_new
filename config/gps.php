@@ -8,6 +8,8 @@ use App\Services\Gps\Gateway\Protocols\Teltonika;
 return [
     'host' => env('GPS_HOST', '0.0.0.0'),
     'port' => (int) env('GPS_PORT', 9000),
+    'serve_autostart' => (bool) env('GPS_SERVE_AUTOSTART', env('APP_ENV', 'production') === 'local'),
+    'serve_realtime' => (bool) env('GPS_SERVE_REALTIME', env('APP_ENV', 'production') === 'local'),
     'cache_store' => env('GPS_CACHE_STORE', 'gps-redis'),
     'queue_connection' => env('GPS_QUEUE_CONNECTION', 'gps-redis'),
     'queue' => 'gps-hardware',
