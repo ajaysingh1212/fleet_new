@@ -99,7 +99,7 @@ class GpsDeviceCommandsTest extends TestCase
         $this->assertNull($service->claim($device->id, $device->identifier, 'wrong-session'));
         $claim = $service->claim($device->id, $device->identifier, $session, 0x01FF);
         $this->assertSame($id, $claim['id']);
-        $this->assertSame(Pt06CommandEncoder::encode('STATUS#', $id, 0x01FF), $claim['frame']);
+        $this->assertSame(Pt06CommandEncoder::encode('STATUS#', $id, 0x01FF, true), $claim['frame']);
         $this->assertNull($service->claim($device->id, $device->identifier, $session));
         $service->sent($id);
         $events = ['server_flag' => $id, 'response_text' => 'GPS: NOT FIXED; GSM: Strong'];

@@ -9,6 +9,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -98,6 +99,11 @@ class User extends Authenticatable implements MustVerifyEmail
     public function city(): BelongsTo
     {
         return $this->belongsTo(City::class);
+    }
+
+    public function assignedVehicles(): BelongsToMany
+    {
+        return $this->belongsToMany(Vehicle::class, 'vehicle_user_assignments')->withPivot('assigned_by')->withTimestamps();
     }
 
     public function deviceSessions(): HasMany

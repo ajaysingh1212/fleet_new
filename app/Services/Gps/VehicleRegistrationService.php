@@ -56,6 +56,14 @@ class VehicleRegistrationService
                 $vehicle->fill(collect($data)->only(['registration_number', 'name', 'status', 'owner_user_id'])->all());
                 $vehicle->details = $details;
                 $vehicle->save();
+                if (! empty($data['assignment_submitted']) || array_key_exists('assigned_user_ids', $data)) {
+                    $userIds = array_values(array_unique(array_map('intval', $data['assigned_user_ids'] ?? [])));
+                    $vehicle->assignedUsers()->syncWithPivotValues($userIds, ['assigned_by' => $request->user()->id]);
+                    $vehicle->owner_user_id = $userIds[0] ?? null;
+                    $vehicle->save();
+                } elseif (! empty($data['owner_user_id'])) {
+                    $vehicle->assignedUsers()->syncWithoutDetaching([$data['owner_user_id'] => ['assigned_by' => $request->user()->id]]);
+                }
                 $device = $sourceDevice ?? $vehicle->gpsDevice;
                 if ($request->boolean('device_enabled')) {
                     $input = $data['device'];

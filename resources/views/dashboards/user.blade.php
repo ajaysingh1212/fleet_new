@@ -5,10 +5,12 @@
 
 @section('content')
     <div id="dashboard-map-tab">@include('dashboards.fleet-map')</div>
-    <aside class="offcanvas offcanvas-end fleet-information-drawer" id="dashboard-information-tab" tabindex="-1" aria-labelledby="fleet-information-title" data-bs-scroll="true" data-bs-backdrop="false">
+    <aside class="offcanvas offcanvas-end fleet-information-drawer fl-drawer" id="dashboard-information-tab" tabindex="-1" aria-labelledby="fleet-information-title" data-bs-scroll="true" data-bs-backdrop="false">
         <div class="offcanvas-header"><h2 class="offcanvas-title h5" id="fleet-information-title">Information &amp; activity</h2><button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close information and activity"></button></div>
         <div class="offcanvas-body">
     <div class="tracker-hero-card tracker-hero-card-user mb-4">
+        {{-- Hero ke peeche halka Ashoka Chakra (decorative) --}}
+        <span class="fl-chakra fl-hero-chakra" aria-hidden="true"></span>
         <div class="row align-items-center g-4">
             <div class="col-lg-8">
                 <div class="tracker-hero-kicker">Personal workspace</div>
@@ -38,31 +40,32 @@
         </div>
     @endforeach
 
+    {{-- Stat cards: accent tricolor mein (saffron / green / navy) --}}
     <div class="row g-4 mb-4">
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-id-badge"></i></div>
+            <div class="tracker-stat-card fl-acc-navy">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-id-badge"></i></div>
                 <div class="tracker-stat-value">{{ $activeLicense?->plan?->name ?? 'N/A' }}</div>
                 <div class="tracker-stat-label">Current License</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-success-subtle text-success"><i class="fa-solid fa-link"></i></div>
+            <div class="tracker-stat-card fl-acc-green">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-link"></i></div>
                 <div class="tracker-stat-value">{{ $stats['availableLicenses'] }}</div>
                 <div class="tracker-stat-label">Available Licenses</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-warning-subtle text-warning"><i class="fa-solid fa-chart-pie"></i></div>
+                <div class="tracker-stat-icon"><i class="fa-solid fa-chart-pie"></i></div>
                 <div class="tracker-stat-value">{{ $stats['trackedUsers'] }}</div>
                 <div class="tracker-stat-label">Tracked Users</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-shield-halved"></i></div>
+            <div class="tracker-stat-card fl-acc-navy">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-shield-halved"></i></div>
                 <div class="tracker-stat-value">{{ auth()->user()->status->label() }}</div>
                 <div class="tracker-stat-label">Account Status</div>
             </div>
@@ -143,13 +146,15 @@
             </div>
         </div>
     </div>
+    </div></aside>
 
-    <div class="modal fade" id="supportModal" tabindex="-1" aria-hidden="true">
+    {{-- Modal ko drawer se bahar rakha hai: offcanvas ke andar modal kabhi kabhi clip/misplace ho jata hai --}}
+    <div class="modal fade" id="supportModal" tabindex="-1" aria-labelledby="supportModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content tracker-modal">
                 <div class="modal-header border-0">
-                    <h5 class="modal-title">Support Center</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h5 class="modal-title" id="supportModalLabel">Support Center</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body text-muted">
                     Need help? Open a support ticket and our team will get back to you.
@@ -160,5 +165,4 @@
             </div>
         </div>
     </div>
-    </div></aside>
 @endsection

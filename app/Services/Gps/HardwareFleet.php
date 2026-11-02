@@ -102,7 +102,7 @@ final class HardwareFleet
         // Parking is an ignition/movement state, independent of the age of the
         // last coordinate. A fresh measured moving fix still takes precedence.
         $state = $device->status !== 'active' ? $device->status : (! $online ? 'offline' :
-            ($gpsState === 'fresh' && $position->speed > 1.8 && ! ($acc === false && $heartbeatNewer) ? 'moving' : ($acc === false ? 'parked' :
+            ($gpsState === 'fresh' && $position->speed > 1.8 ? 'moving' : ($acc === false ? 'parked' :
                 ($gpsState !== 'fresh' ? $gpsState : ($position->speed === null ? 'unknown' : ($acc === true ? 'idle' : 'stopped'))))));
 
         return [...($position ? HardwareLocationUpdated::payload($device, $position) :

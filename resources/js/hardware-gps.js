@@ -159,7 +159,9 @@ export function initHardwareGps() {
         }
         if (point(p)) {
             let marker = markers.get(id);
-            const newer = !old || Date.parse(p.recorded_at) > Date.parse(old.recorded_at);
+            const positionClock = Date.parse(p.live_position_received_at ?? p.recorded_at);
+            const oldPositionClock = Date.parse(old?.live_position_received_at ?? old?.recorded_at);
+            const newer = !old || positionClock > oldPositionClock;
             const appearance = `${fleetState(p)}:${vehicleIcon(p)}:${(consoleUi?.getAlerts(p.device_id)??[]).map(a=>`${a.rule_id}:${a.type}:${a.historical}`).join(',')}`;
             if (!marker) {
                 marker = L.marker([p.latitude, p.longitude], {icon: icon(p)}).addTo(map);
@@ -181,7 +183,14 @@ export function initHardwareGps() {
                     marker.setPopupContent(popup(p));
                 }
                 if (newer) {
-                    animations.get(id).push([p.latitude, p.longitude], Date.parse(p.recorded_at), {onFrame: () => markerDrawn(p)});
+                    // GPS stores whole-second device timestamps; a delayed or
+                    // repeated timestamp must not freeze the marker. Apply each
+                    // accepted live fix at its decoded coordinates immediately.
+                    const motion = animations.get(id);
+                    motion?.stop();
+                    motion.timestamp = Math.max(motion.timestamp, positionClock);
+                    marker.setLatLng([p.latitude, p.longitude]);
+                    markerDrawn(p);
                 }
             }
         } else {

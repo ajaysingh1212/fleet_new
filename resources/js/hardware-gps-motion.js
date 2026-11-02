@@ -17,12 +17,13 @@ export function mergeFleetUpdate(old, incoming) {
         for (const field of ['latitude', 'longitude', 'recorded_at', 'received_at', 'speed', 'heading',
             'last_packet_at', 'acc', 'acc_reported', 'acc_reported_at', 'acc_source',
             'gps_positioned_reported', 'gps_reported_at', 'gps_fresh', 'gps_state',
-            'live_revision', 'live_received_at', 'altitude', 'satellites', 'sensors', 'heartbeat_sensors', 'heartbeat_reported_at',
+            'live_revision', 'live_received_at', 'live_position_received_at', 'altitude', 'satellites', 'sensors', 'heartbeat_sensors', 'heartbeat_reported_at',
             'power_sensors', 'power_reported_at', 'charging', 'external_power', 'external_voltage', 'battery_voltage', 'power_level',
             'power_description', 'charging_current', 'external_power_current']) p[field] = old[field];
     } else if (old.observed_at && incoming.observed_at && incoming.observed_at < old.observed_at
         && !(Date.parse(incoming.live_received_at) > (Date.parse(old.live_received_at ?? old.last_packet_at) || 0))) return old;
-    if (Date.parse(incoming.recorded_at) < Date.parse(old.recorded_at)) {
+    const newerLivePosition = Date.parse(incoming.live_position_received_at) > Date.parse(old.live_position_received_at);
+    if (!newerLivePosition && Date.parse(incoming.recorded_at) < Date.parse(old.recorded_at)) {
         for (const field of ['latitude', 'longitude', 'recorded_at', 'received_at', 'speed', 'heading', 'altitude', 'satellites', 'sensors']) p[field] = old[field];
     }
     if (Date.parse(incoming.acc_reported_at) < Date.parse(old.acc_reported_at)) {
@@ -48,7 +49,6 @@ export function fleetState(p, now = Date.now()) {
     const accTime = Date.parse(p.acc_reported_at ?? p.recorded_at);
     const acc = Number.isFinite(accTime) && now - accTime <= threshold ? (p.acc_reported ?? p.acc) : null;
     const fresh = Number.isFinite(fix) && now - fix <= gpsThreshold && p.gps_positioned_reported !== false;
-    if (acc === false && accTime > fix) return 'parked';
     if (fresh && p.speed != null && p.speed > 1.8) return 'moving';
     if (acc === false) return 'parked';
     if (!Number.isFinite(fix)) return 'awaiting_gps';

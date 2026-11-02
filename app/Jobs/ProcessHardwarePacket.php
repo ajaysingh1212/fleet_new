@@ -110,6 +110,9 @@ class ProcessHardwarePacket implements ShouldQueue
         HardwareTelemetry::phase($result ? 'history_stored' : 'history_rejected', ['trace_id' => $this->traceId ?? null,
             'device_id' => $this->deviceId, 'type' => $this->type, 'received_at' => $this->receivedPreciselyAt ?? $this->receivedAt,
             'duration_ms' => (hrtime(true) - $started) / 1000000, 'new_location' => $result['new_location'] ?? false]);
+        if ($this->type === 'command_response') {
+            app(\App\Services\Gps\DeviceCommands::class)->reply($this->deviceId, $this->sessionId, $this->events);
+        }
         if ($result['latest_changed'] ?? false) {
             HardwareTelemetry::phase('latest_stored', [
                 'trace_id' => $this->traceId ?? null, 'device_id' => $this->deviceId, 'recorded_at' => $result['recorded_at']]);

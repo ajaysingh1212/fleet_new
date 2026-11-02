@@ -13,10 +13,12 @@ is not assumed. Ranges absent from the manual are explicitly labeled as
 application limits. Protocol-only movement/geofence commands with ambiguous
 syntax are not invented. The list is maintained in `config/pt06_commands.php`.
 
-Transport uses the authenticated PT06 connection in `gps:diagnose --persist`
-(`gps:listen --diagnostic --persist --registered`, including `artisan serve`).
-The separate Redis production gateway does not advertise this command transport;
-its devices cannot enqueue commands through this feature yet.
+Transport uses the authenticated PT06 connection in either the registered
+diagnostic listener or the production `gps:listen` gateway. Commands from the
+admin panel are queued for that exact live session and written as PT06 0x80
+frames. Production command replies (0x21) return through the GPS worker and are
+matched to the device, session and server flag before appearing in command
+history. Other protocol adapters do not support this command channel.
 
 Run the additive `2026_10_29_000001_create_gps_device_commands_table.php` migration
 and restart the receiver after deploying. No SMS provider is used. A missing
@@ -38,6 +40,11 @@ language bytes, but its Appendix B CRC-valid command fixture omits them. The
 encoder now follows section 6.1 with the English language field (0002), outside the command length but inside packet length and CRC. The legacy Appendix B form remains covered by an explicit encoder test. Section 6.2 replies (0x21) support ASCII and
 UTF-16BE. Results are matched by flag, device and TCP session; another device's
 response cannot complete the request. HTML in replies is never rendered as HTML.
+
+For firmware `WW_EV02_V05-2020.8.28`, the supplied screenshot shows `TIMER:10,10`
+and accepts the server address/port command by SMS. `TIMER` controls GPS report
+cadence; it is separate from `HBT` heartbeat cadence. Server commands from this
+panel use the documented PT06 binary command channel, not SMS delivery.
 
 For BR52C6695, the observed 29 October 2026 heartbeat reports GSM strong, charging,
 ACC OFF and GPS not positioned. Login/heartbeat/SIM packets contain no coordinates.

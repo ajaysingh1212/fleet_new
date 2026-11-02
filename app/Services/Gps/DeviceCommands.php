@@ -28,6 +28,33 @@ class DeviceCommands
             ]);
     }
 
+    public function signalPending(int $deviceId, string $session): void
+    {
+        Cache::store(config('gps.live_cache_store'))->put($this->pendingKey($deviceId), $session, 90);
+    }
+
+    public function consumePending(int $deviceId, string $session): bool
+    {
+        $cache = Cache::store(config('gps.live_cache_store'));
+        $key = $this->pendingKey($deviceId);
+        if ($cache->get($key) !== $session) {
+            return false;
+        }
+        $cache->forget($key);
+
+        return true;
+    }
+
+    public function hasPending(int $deviceId, string $session): bool
+    {
+        return Cache::store(config('gps.live_cache_store'))->get($this->pendingKey($deviceId)) === $session;
+    }
+
+    private function pendingKey(int $deviceId): string
+    {
+        return 'gps.command.pending.'.$deviceId;
+    }
+
     public function request(GpsDevice $device, int $userId, string $text, string $requestId, bool $confirmed): array
     {
         $parsed = app(Pt06CommandCatalog::class)->validate($text);
@@ -35,7 +62,7 @@ class DeviceCommands
             throw ValidationException::withMessages(['confirmed' => 'Review and confirm this device-changing command before sending.']);
         }
 
-        return DB::transaction(function () use ($device, $userId, $requestId, $parsed) {
+        $result = DB::transaction(function () use ($device, $userId, $requestId, $parsed) {
             $device = GpsDevice::whereKey($device->id)->lockForUpdate()->firstOrFail();
             $previous = DB::table('gps_device_commands')->where('request_id', $requestId)->first();
             if ($previous) {
@@ -59,6 +86,11 @@ class DeviceCommands
 
             return (array) DB::table('gps_device_commands')->find($id);
         });
+        if (($result['status'] ?? null) === 'queued') {
+            $this->signalPending($device->id, $result['session_id']);
+        }
+
+        return $result;
     }
 
     public function claim(int $deviceId, string $imei, string $session, ?int $nextSerial = null): ?array
@@ -90,7 +122,7 @@ class DeviceCommands
             // unrelated to the terminal's most recent packet.
             $serial = $nextSerial === null ? $command->id % 65536 : $nextSerial;
 
-            return ['id' => $command->id, 'frame' => Pt06CommandEncoder::encode($command->command, $command->id, $serial)];
+            return ['id' => $command->id, 'frame' => Pt06CommandEncoder::encode($command->command, $command->id, $serial, true)];
         });
     }
 
@@ -105,7 +137,7 @@ class DeviceCommands
     {
         return (bool) DB::table('gps_device_commands')->where('id', $events['server_flag'] ?? 0)
             ->where('gps_device_id', $deviceId)->where('session_id', $session)
-            ->whereIn('status', ['writing', 'sent', 'timed_out'])->update([
+            ->whereIn('status', ['writing', 'sent', 'timed_out', 'failed'])->update([
                 'status' => 'replied', 'response' => mb_substr($events['response_text'] ?? '', 0, 16000),
                 'error' => null, 'replied_at' => now(), 'updated_at' => now(),
             ]);

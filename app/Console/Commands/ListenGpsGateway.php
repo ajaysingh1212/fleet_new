@@ -104,6 +104,16 @@ class ListenGpsGateway extends Command
             try {
                 HardwareTelemetry::phase('socket_closed', ['device_id' => $clients[$id]['state']->device['id'] ?? null,
                     'session_id' => $clients[$id]['state']->id, 'reason' => $reason]);
+            } catch (Throwable) {
+            }
+            if (($clients[$id]['state']->device['protocol'] ?? null) === 'pt06') {
+                try {
+                    app(\App\Services\Gps\DeviceCommands::class)->disconnected(
+                        $clients[$id]['state']->device['id'], $clients[$id]['state']->id, $reason);
+                } catch (Throwable) {
+                }
+            }
+            try {
                 $gateway->disconnected($clients[$id]['state']);
             } catch (Throwable) {
             }
@@ -125,6 +135,31 @@ class ListenGpsGateway extends Command
                     HardwareTelemetry::receiver($port, count($clients), count(array_filter($clients, fn ($c) => $c['state']->device !== null)));
                     $allowlist->store()->put('gps.hardware.health', time(), 15);
                     $healthAt = time();
+                }
+                foreach ($clients as $id => $client) {
+                    $connection = $client['state'];
+                    if (($connection->device['protocol'] ?? null) !== 'pt06') {
+                        continue;
+                    }
+                    try {
+                        $commands = app(\App\Services\Gps\DeviceCommands::class);
+                        if ($commands->session($connection->device['id']) !== $connection->id) {
+                            continue;
+                        }
+                        $commands->connected($connection->device['id'], $connection->id);
+                        if ($clients[$id]['out'] === ''
+                            && $commands->hasPending($connection->device['id'], $connection->id)) {
+                            $command = $commands->claim($connection->device['id'], $connection->identifier,
+                                $connection->id, $connection->lastSerial === null ? null : (($connection->lastSerial + 1) & 0xFFFF));
+                            if ($command) {
+                                $clients[$id]['out'] = $command['frame'];
+                                $clients[$id]['command_id'] = $command['id'];
+                            }
+                            $commands->consumePending($connection->device['id'], $connection->id);
+                        }
+                    } catch (Throwable) {
+                        // A command storage/cache failure must not interrupt GPS reception.
+                    }
                 }
                 $read = [$server];
                 $write = [];
@@ -219,6 +254,13 @@ class ListenGpsGateway extends Command
                         $close($id, 'write_failed');
                     } else {
                         $clients[$id]['out'] = substr($clients[$id]['out'], $written);
+                        if ($clients[$id]['out'] === '' && isset($clients[$id]['command_id'])) {
+                            try {
+                                app(\App\Services\Gps\DeviceCommands::class)->sent($clients[$id]['command_id']);
+                            } catch (Throwable) {
+                            }
+                            unset($clients[$id]['command_id']);
+                        }
                     }
                 }
                 foreach ($clients as $id => $client) {

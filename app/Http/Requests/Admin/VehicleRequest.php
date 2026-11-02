@@ -33,6 +33,9 @@ class VehicleRequest extends FormRequest
         return ['registration_number' => ['required', 'string', 'max:255', Rule::unique('vehicles')->ignore($this->route('vehicle')?->id)],
             'name' => ['required', 'string', 'max:255'], 'status' => ['required', Rule::in(['active', 'inactive', 'maintenance'])],
             'owner_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'assigned_user_ids' => ['nullable', 'array'],
+            'assigned_user_ids.*' => ['integer', 'distinct', 'exists:users,id'],
+            'assignment_submitted' => ['nullable', 'boolean'],
             'details' => ['nullable', 'array'], 'documents' => ['nullable', 'array', 'max:5'],
             'documents.*' => ['file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'], ...self::detailRules()];
     }

@@ -22,6 +22,7 @@ export default defineConfig({
                 'resources/js/geofence-manager.js',
                 'resources/js/vehicle-geofences.js',
                 'resources/js/report-page.js',
+                'resources/js/admin-vehicle-replay.js',
                 'resources/js/field-task-form.js',
                 'resources/js/field-task-show.js',
                 'resources/js/vehicle-registration.js',

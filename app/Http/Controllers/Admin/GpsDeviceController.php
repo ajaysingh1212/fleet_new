@@ -163,15 +163,26 @@ class GpsDeviceController extends Controller
             $started = hrtime(true); DB::select('select 1');
             $database['latency_ms'] = round((hrtime(true) - $started) / 1000000, 2);
         } catch (\Throwable) { $database = ['status' => 'error', 'latency_ms' => null]; }
-        $redis = ['status' => 'unknown', 'latency_ms' => null];
-        try {
-            $started = hrtime(true); $pong = Redis::connection('gps')->ping();
-            $redis = ['status' => (strtoupper((string) $pong) === 'PONG' || $pong === true) ? 'connected' : 'error',
-                'latency_ms' => round((hrtime(true) - $started) / 1000000, 2)];
-        } catch (\Throwable) { $redis = ['status' => 'error', 'latency_ms' => null]; }
+        // Redis is optional in the local database/file-backed GPS mode. Probe
+        // it only when the active ingestion, live-state or broadcast path uses it.
+        $redisRequired = config('app.env') !== 'local'
+            || in_array(config('gps.queue_connection'), ['redis', 'gps-redis'], true)
+            || in_array(config('gps.live_connection'), ['redis', 'gps-redis'], true)
+            || in_array(config('gps.broadcast_connection'), ['redis', 'gps-redis'], true)
+            || in_array(config('gps.live_cache_store'), ['redis', 'gps-redis'], true);
+        $redis = ['status' => 'not_required', 'latency_ms' => null];
+        if ($redisRequired) {
+            try {
+                $started = hrtime(true); $pong = Redis::connection('gps')->ping();
+                $redis = ['status' => (strtoupper((string) $pong) === 'PONG' || $pong === true) ? 'connected' : 'error',
+                    'latency_ms' => round((hrtime(true) - $started) / 1000000, 2)];
+            } catch (\Throwable) { $redis = ['status' => 'error', 'latency_ms' => null]; }
+        }
         $reverb = ['status' => 'unknown'];
-        $host = config('reverb.servers.reverb.host', env('REVERB_HOST', '127.0.0.1'));
-        $port = (int) config('reverb.servers.reverb.port', env('REVERB_PORT', 8080));
+        // The Reverb server host is a bind address (often 0.0.0.0); probe
+        // the client-facing host/port used by Laravel's broadcaster instead.
+        $host = config('broadcasting.connections.reverb.options.host') ?: env('REVERB_HOST', '127.0.0.1');
+        $port = (int) (config('broadcasting.connections.reverb.options.port') ?: env('REVERB_PORT', 8080));
         try {
             $probe = @stream_socket_client('tcp://'.$host.':'.$port, $errno, $error, 0.3);
             $reverb = ['status' => is_resource($probe) ? 'reachable' : 'error'];

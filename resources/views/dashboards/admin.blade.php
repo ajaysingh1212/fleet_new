@@ -5,15 +5,17 @@
 
 @section('content')
     <div id="dashboard-map-tab">@include('dashboards.fleet-map')</div>
-    <aside class="offcanvas offcanvas-end fleet-information-drawer" id="dashboard-information-tab" tabindex="-1" aria-labelledby="fleet-information-title" data-bs-scroll="true" data-bs-backdrop="false">
+    <aside class="offcanvas offcanvas-end fleet-information-drawer fl-drawer" id="dashboard-information-tab" tabindex="-1" aria-labelledby="fleet-information-title" data-bs-scroll="true" data-bs-backdrop="false">
         <div class="offcanvas-header"><h2 class="offcanvas-title h5" id="fleet-information-title">Information &amp; activity</h2><button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close information and activity"></button></div>
         <div class="offcanvas-body">
     <div class="tracker-hero-card mb-4">
+        {{-- Hero ke peeche halka Ashoka Chakra (decorative) --}}
+        <span class="fl-chakra fl-hero-chakra" aria-hidden="true"></span>
         <div class="row align-items-center g-4">
             <div class="col-xl-7">
                 <div class="tracker-hero-kicker">Control Center</div>
                 <h2 class="tracker-hero-title">Your platform at a glance</h2>
-                <p class="tracker-hero-text mb-0">Users, licenses, admin activity, and operational signals are now grouped into a more usable admin shell for {{ now()->format('F j, Y') }}.</p>
+                <p class="tracker-hero-text mb-0">Users, licenses, admin activity and operational signals, all in one place for {{ now()->format('F j, Y') }}.</p>
             </div>
             <div class="col-xl-5">
                 <div class="tracker-hero-grid">
@@ -62,59 +64,60 @@
         </div>
     </div>
 
+    {{-- Stat cards: accent tricolor mein (saffron / green / navy), expired ke liye red --}}
     <div class="row g-4 mb-4">
         <div class="col-xl-3 col-md-6">
             <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-users"></i></div>
+                <div class="tracker-stat-icon"><i class="fa-solid fa-users"></i></div>
                 <div class="tracker-stat-value">{{ $stats['totalUsers'] }}</div>
                 <div class="tracker-stat-label">Total Users</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-success-subtle text-success"><i class="fa-solid fa-user-check"></i></div>
+            <div class="tracker-stat-card fl-acc-green">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-user-check"></i></div>
                 <div class="tracker-stat-value">{{ $stats['activeUsers'] }}</div>
                 <div class="tracker-stat-label">Active Users</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-warning-subtle text-warning"><i class="fa-solid fa-id-card"></i></div>
+            <div class="tracker-stat-card fl-acc-navy">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-id-card"></i></div>
                 <div class="tracker-stat-value">{{ $stats['licenses'] }}</div>
                 <div class="tracker-stat-label">Total Licenses</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-danger-subtle text-danger"><i class="fa-solid fa-clock"></i></div>
+            <div class="tracker-stat-card fl-acc-red">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-clock"></i></div>
                 <div class="tracker-stat-value">{{ $stats['expiredLicenses'] }}</div>
                 <div class="tracker-stat-label">Expired Licenses</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-info-subtle text-info"><i class="fa-solid fa-user-tie"></i></div>
+                <div class="tracker-stat-icon"><i class="fa-solid fa-user-tie"></i></div>
                 <div class="tracker-stat-value">{{ $stats['managers'] }}</div>
                 <div class="tracker-stat-label">Managers</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-secondary-subtle text-secondary"><i class="fa-solid fa-user-shield"></i></div>
+            <div class="tracker-stat-card fl-acc-navy">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-user-shield"></i></div>
                 <div class="tracker-stat-value">{{ $stats['admins'] }}</div>
                 <div class="tracker-stat-label">Admins</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
-            <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-success-subtle text-success"><i class="fa-solid fa-arrow-right-to-bracket"></i></div>
+            <div class="tracker-stat-card fl-acc-green">
+                <div class="tracker-stat-icon"><i class="fa-solid fa-arrow-right-to-bracket"></i></div>
                 <div class="tracker-stat-value">{{ $stats['todaysLogins'] }}</div>
                 <div class="tracker-stat-label">Today's Logins</div>
             </div>
         </div>
         <div class="col-xl-3 col-md-6">
             <div class="tracker-stat-card">
-                <div class="tracker-stat-icon bg-primary-subtle text-primary"><i class="fa-solid fa-user-plus"></i></div>
+                <div class="tracker-stat-icon"><i class="fa-solid fa-user-plus"></i></div>
                 <div class="tracker-stat-value">{{ $stats['todaysRegistrations'] }}</div>
                 <div class="tracker-stat-label">Today's Registrations</div>
             </div>

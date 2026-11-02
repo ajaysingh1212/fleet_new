@@ -21,7 +21,7 @@ class DashboardFleetController extends Controller
         // Ownership is checked on every reconciliation; query parameters never widen it.
         $vehicles = Vehicle::query()
             ->when($devicePage, fn ($q) => $q->whereRaw('1 = 0'))
-            ->when(! $admin, fn ($q) => $q->where('owner_user_id', $request->user()->id))
+            ->when(! $admin, fn ($q) => $q->whereHas('assignedUsers', fn ($u) => $u->whereKey($request->user()->id)))
             ->where('id', '>', (int) $request->query('after', 0))->orderBy('id')->limit(251)->get();
         $more = $vehicles->count() > 250;
         $vehicles = $vehicles->take(250);

@@ -60,11 +60,17 @@ final class HardwareLiveState
                 if (! $location['gps_fix']) {
                     continue;
                 }
+                $retransmission = (bool) ($location['telemetry']['gps_retransmission'] ?? false);
                 $time = CarbonImmutable::parse($location['recorded_at'], 'UTC')->toIso8601String();
-                if (! empty($incoming['recorded_at']) && $incoming['recorded_at'] >= $time) {
+                // A normal live fix describes the tracker's current position even
+                // when its GPS clock is a few seconds behind. Do not let the
+                // recorded-time guard suppress movement updates; retransmitted
+                // backlog points remain excluded from the live marker.
+                if ($retransmission || (! empty($incoming['recorded_at']) && $incoming['recorded_at'] > $time)) {
                     continue;
                 }
                 $incoming = [...$incoming, 'recorded_at' => $time, 'received_at' => $receivedAt,
+                    'live_position_received_at' => $receivedAt,
                     'trace_id' => $packet->traceId ?? null,
                     'latitude' => $location['latitude'], 'longitude' => $location['longitude'],
                     'speed' => $location['speed'], 'heading' => $location['heading'],
@@ -122,8 +128,20 @@ final class HardwareLiveState
 
     private function merge(array $base, array $incoming): array
     {
+        // Live coordinates are ordered by packet arrival, while stored history
+        // remains ordered by the device's GPS timestamp. This lets a current
+        // non-retransmitted fix move the map when the device clock lags.
+        if (! empty($incoming['live_position_received_at'])
+            && $this->time($incoming['live_position_received_at']) > $this->time($base['live_position_received_at'] ?? null)) {
+            foreach (['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude',
+                'satellites', 'sensors', 'trace_id', 'live_position_received_at'] as $field) {
+                if (array_key_exists($field, $incoming)) {
+                    $base[$field] = $incoming[$field];
+                }
+            }
+        }
         foreach ([['last_packet_at', ['last_packet_at']],
-            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude', 'satellites', 'sensors', 'trace_id']],
+            ['recorded_at', ['latitude', 'longitude', 'speed', 'heading', 'recorded_at', 'received_at', 'altitude', 'satellites', 'sensors', 'trace_id', 'live_position_received_at']],
             ['heartbeat_reported_at', ['heartbeat_sensors', 'heartbeat_reported_at']],
             ['power_reported_at', ['power_sensors', 'power_reported_at', 'charging', 'external_power', 'external_voltage',
                 'battery_voltage', 'power_level', 'power_description']],
@@ -175,8 +193,7 @@ final class HardwareLiveState
         $p['gps_state'] = empty($p['recorded_at']) ? 'awaiting_gps' : (($p['gps_positioned_reported'] ?? null) === false ? 'no_gps_fix' : ($fresh ? 'fresh' : 'stale_gps'));
         $p['gps_fresh'] = $p['gps_state'] === 'fresh';
         $p['state'] = $p['authorization'] !== 'active' ? $p['authorization'] : (! $p['online'] ? 'offline' :
-            ($p['gps_fresh'] && ($p['speed'] ?? 0) > 1.8
-                && ! ($p['acc'] === false && $this->time($p['acc_reported_at'] ?? null) > $this->time($p['recorded_at'] ?? null)) ? 'moving' : ($p['acc'] === false ? 'parked' :
+            ($p['gps_fresh'] && ($p['speed'] ?? 0) > 1.8 ? 'moving' : ($p['acc'] === false ? 'parked' :
                 (! $p['gps_fresh'] ? $p['gps_state'] : (($p['speed'] ?? null) === null ? 'unknown' : ($p['acc'] === true ? 'idle' : 'stopped'))))));
         $p['observed_at'] = now()->utc()->format('Y-m-d\TH:i:s.u\Z');
 

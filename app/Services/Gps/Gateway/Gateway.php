@@ -39,6 +39,7 @@ final class Gateway
             $binaryLogin = in_array(substr($frame, 0, 2), ["\x78\x78", "\x79\x79"], true)
                 && ord($frame[substr($frame, 0, 2) === "\x79\x79" ? 4 : 3]) === 1;
             $packet = $connection->protocol->decode($frame, $connection->device !== null && ! $binaryLogin);
+            $connection->lastSerial = unpack('n', substr($frame, -6, 2))[1];
             if ($packet->identifier !== null) {
                 if ($connection->identifier !== null && $packet->identifier !== $connection->identifier) {
                     throw new InvalidArgumentException('device_identity_changed');
@@ -65,6 +66,13 @@ final class Gateway
                 throw new InvalidArgumentException('unauthorized_device');
             }
             $connection->device = $device;
+            if ($connection->protocol->name() === 'pt06') {
+                try {
+                    app(\App\Services\Gps\DeviceCommands::class)->connected($device['id'], $connection->id);
+                } catch (\Throwable) {
+                    // Command availability must not interrupt GPS packet ingestion.
+                }
+            }
             // Redis enqueue completes before acknowledging. On overload/failure close
             // without ACK, letting the tracker retry. No SQL in the socket loop.
             $queue = Queue::connection(config('gps.queue_connection'));

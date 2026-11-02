@@ -99,7 +99,7 @@ Route::middleware(['auth', 'verified'])->prefix('admin')->name('admin.')->group(
     Route::get('geofences', [GeofenceController::class, 'index'])
         ->middleware('permission:manage geofences|manage tracked geofences|use tracking workspace')->name('geofences.index');
 
-    Route::middleware('permission:manage geofences|manage tracked geofences')->group(function () {
+    Route::middleware('permission:manage geofences|manage tracked geofences|use tracking workspace')->group(function () {
         Route::get('monitoring/dashboard', [MonitoringController::class, 'dashboard'])->name('monitoring.dashboard');
         Route::get('monitoring/replay', [MonitoringController::class, 'replay'])->name('monitoring.replay');
     });

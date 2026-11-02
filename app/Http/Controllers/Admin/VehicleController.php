@@ -70,6 +70,7 @@ class VehicleController extends Controller
     private function form(Vehicle $vehicle)
     {
         $vehicle->loadMissing('gpsDevice');
+        $vehicle->load('assignedUsers:id,name,email');
         $models = GpsDeviceModel::where(fn ($q) => $q->where('active', true)->orWhere('id', $vehicle->gpsDevice?->gps_device_model_id))->orderBy('name')->get();
 
         return view('admin.vehicles.form', compact('vehicle', 'models'));

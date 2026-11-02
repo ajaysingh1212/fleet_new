@@ -16,6 +16,8 @@ final class Connection
 
     public ?string $receivedAt = null;
 
+    public ?int $lastSerial = null;
+
     public readonly string $id;
 
     public readonly string $connectedAt;
