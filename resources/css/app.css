@@ -1472,6 +1472,34 @@ body {
     margin: 0 0 8px;
 }
 
+/* The fixed sidebar can be dark, but its top/bottom flyout sits over the light
+   page. Keep that flyout opaque and use dark labels in light mode. */
+html[data-bs-theme="light"][data-sidebar-position="top"] .tracker-submenu.nav-treeview,
+html[data-bs-theme="light"][data-sidebar-position="bottom"] .tracker-submenu.nav-treeview {
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid rgba(31, 53, 78, 0.12);
+    box-shadow: 0 18px 42px rgba(18, 35, 56, 0.2);
+    backdrop-filter: blur(16px);
+}
+
+html[data-bs-theme="light"][data-sidebar-position="top"] .tracker-submenu .tracker-nav-link-sub:not(.active):not(:hover),
+html[data-bs-theme="light"][data-sidebar-position="bottom"] .tracker-submenu .tracker-nav-link-sub:not(.active):not(:hover) {
+    color: #24384e !important;
+    background: transparent;
+}
+
+html[data-bs-theme="light"][data-sidebar-position="top"] .tracker-submenu .tracker-nav-copy p,
+html[data-bs-theme="light"][data-sidebar-position="bottom"] .tracker-submenu .tracker-nav-copy p {
+    color: #24384e;
+}
+
+html[data-bs-theme="light"][data-sidebar-position="top"] .tracker-submenu .tracker-nav-link-sub:hover .tracker-nav-copy p,
+html[data-bs-theme="light"][data-sidebar-position="top"] .tracker-submenu .tracker-nav-link-sub.active .tracker-nav-copy p,
+html[data-bs-theme="light"][data-sidebar-position="bottom"] .tracker-submenu .tracker-nav-link-sub:hover .tracker-nav-copy p,
+html[data-bs-theme="light"][data-sidebar-position="bottom"] .tracker-submenu .tracker-nav-link-sub.active .tracker-nav-copy p {
+    color: #fff;
+}
+
 /* ---------- Theme customizer trigger + panel ---------- */
 
 .tracker-customizer-fab {
